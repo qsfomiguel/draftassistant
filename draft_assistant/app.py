@@ -5,7 +5,8 @@ import threading
 import time
 
 from . import demo
-from .constants import PERCENT_STATS, STAT_NAMES
+from .constants import PERCENT_STATS, PRO_TEAMS, STAT_NAMES
+from .depth import DepthError, team_depth
 from .config import CACHE_DIR, Config, normalize_espn_s2, normalize_swid, parse_punt, save_config
 from .draft import DraftState, suggest
 from .espn import EspnClient, EspnError, find_my_team, parse_league, parse_picks, parse_players
@@ -326,6 +327,35 @@ class App:
             rows.append({"source": label, "gp": round(p.gp) if p.gp else None, "stats": stats(p.avg), "average": True})
             return {"id": p.id, "name": p.name, "stat_ids": [str(s) for s in stat_ids],
                     "names": {str(s): STAT_NAMES.get(s, str(s)) for s in stat_ids}, "rows": rows}
+
+    def depth_chart(self, player_id: int) -> dict:
+        """The depth chart of a player's NBA team, marking who's drafted and by whom."""
+        with self.lock:
+            if not self.state or player_id not in self.state.players:
+                raise ValueError("Unknown player.")
+            state = self.state
+            p = state.players[player_id]
+            team_id = next((tid for tid, abbr in PRO_TEAMS.items() if abbr == p.pro_team and tid), None)
+            owner = {pick.player_id: pick.team_id for pick in state.picks.values()}
+            teams = state.league.teams
+            values = self.valuation.value if self.valuation else {}
+        if team_id is None:
+            raise ValueError(f"{p.name} isn't on an NBA team right now.")
+        try:
+            depth = team_depth(team_id, CACHE_DIR)  # network call outside the lock
+        except DepthError as exc:
+            raise ValueError(str(exc)) from exc
+        positions = []
+        for pos in depth["positions"]:
+            players = []
+            for a in pos["players"]:
+                tid = owner.get(a["id"])
+                players.append({**a, "selected": a["id"] == player_id,
+                                "status": "mine" if tid is not None and tid == state.my_team_id else "taken" if tid is not None else "available",
+                                "owner": teams[tid].name if tid in teams else None,
+                                "value": round(values[a["id"]], 1) if a["id"] in values else None})
+            positions.append({"pos": pos["pos"], "players": players})
+        return {"id": player_id, "name": p.name, "team": p.pro_team, "positions": positions, "fetched": depth["fetched"]}
 
     def search(self, query: str) -> list[dict]:
         with self.lock:

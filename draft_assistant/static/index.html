@@ -121,6 +121,15 @@ th.sorted { color: var(--accent); }
 .scar .lvl.scarce { background: var(--bad); color: #fff; }
 .scar .lvl.drying { background: var(--warn); color: #fff; }
 .scar .lvl.ok { background: var(--chip); color: var(--muted); }
+.depth { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.depth h3 { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
+.depth ol { margin: 0; padding-left: 18px; font-size: 12px; }
+.depth li { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.depth li.start { font-weight: 600; }
+.depth li.selp { color: #fff; background: #16a34a; border-radius: 4px; padding: 0 4px; margin-left: -4px; }
+.depth li.taken { color: var(--muted); text-decoration: line-through; }
+.depth li.mine { color: var(--mine-strong); }
+@media (max-width: 700px) { .depth { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin-top: 6px; }
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; }
 .selrow td { background: color-mix(in srgb, #22a06b 14%, transparent) !important; }
@@ -170,10 +179,12 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 let S = null;            // latest full state
 let version = null;
-let filter = { pos: "ALL", q: "", hideInjured: false, limit: 40, sort: "score" };  // sort: "score", "adp" or a category id
+let filter = { pos: "ALL", q: "", hideInjured: false, limit: 40, sort: "score" };  // sort: "score", "adp", "rank" or a category id
+let scarOrder = "espn";  // scarcity looks at the next 20 in ESPN's order ("espn") or in my list ("mine")
 let wasMyTurn = false;
 let selected = null;      // player picked to preview on the team chart
 let detail = null;        // that player's projections by source, from /api/player
+let depth = null;         // his NBA team's depth chart, from /api/depth
 
 async function api(path, body) {
   const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
@@ -220,7 +231,7 @@ function render() {
   const scrollY = window.scrollY;
   const focused = document.activeElement && document.activeElement.id;
   root.innerHTML = `<main>
-    <div class="stack">${clockView()}${boardView()}</div>
+    <div class="stack">${clockView()}${depthView()}${boardView()}</div>
     <div class="stack">${S.league.is_points ? standingsView() : radarView() + scarcityView()}${rosterView()}${logView()}</div>
   </main>`;
   bindBoard();
@@ -336,6 +347,7 @@ function filtered() {
     (!q || p.name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").includes(q)));
   const k = filter.sort;
   if (k === "adp") return rows.slice().sort((a, b) => (a.adp ?? 999) - (b.adp ?? 999));
+  if (k === "rank") return rows.slice().sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999));
   if (k !== "score") return rows.slice().sort((a, b) => (b.cats[k] ?? b[k] ?? -99) - (a.cats[k] ?? a[k] ?? -99));
   return rows;
 }
@@ -367,7 +379,9 @@ function dropOffs() {
 function scarcityView() {
   const lg = S.league;
   if (lg.is_points) return "";
-  const board = S.suggestions, GOOD = 0.5;
+  const GOOD = 0.5;
+  // ESPN's order is what most other teams see (and what autodraft uses), so it predicts who goes next.
+  const board = scarOrder === "espn" ? S.suggestions.slice().sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999)) : S.suggestions;
   const rows = lg.categories.map(c => {
     const id = String(c.id);
     const now = board.slice(0, 20), later = board.slice(20, 40);
@@ -391,7 +405,9 @@ function scarcityView() {
     <div class="bar" title="${r.good} of the next 20 are good at ${esc(r.c.name)}"><div style="width:${r.good / 20 * 100}%;background:${r.lvl[0] === "scarce" ? "var(--bad)" : r.lvl[0] === "drying" ? "var(--warn)" : "var(--good)"}"></div></div>
     <span class="lvl ${r.lvl[0]}">${r.lvl[1]}</span>
     <span class="what">${r.good}/20 good now · ${r.goodLater}/20 in the 20 after${r.best ? ` · best: ${esc(r.best.name)} ${(r.best.cats[r.id] > 0 ? "+" : "")}${(r.best.cats[r.id] ?? 0).toFixed(1)}` : ""}</span>`).join("");
-  return `<div class="panel"><h2>Category scarcity · next 20 on the list</h2><div class="scar">${html}</div>
+  const tog = `<span class="chips" style="float:right;margin-top:-4px">${[["espn", "ESPN order"], ["mine", "My list"]].map(([k, l]) =>
+    `<button class="${scarOrder === k ? "on" : ""}" data-scar="${k}">${l}</button>`).join("")}</span>`;
+  return `<div class="panel"><h2>${tog}Category scarcity · next 20 ${scarOrder === "espn" ? "in ESPN's order" : "on my list"}</h2><div class="scar">${html}</div>
     <p class="hint">"Good" means at least +0.5 in that category. <b>Scarce</b>: 3 or fewer good players left in the next 20, so grab one soon if you need it. <b>Thin</b>: only 4–6. <b>Drying up</b>: thinning out faster further down the list than the other categories. Click a category to sort the list by it.</p></div>`;
 }
 function boardView() {
@@ -403,7 +419,7 @@ function boardView() {
     `<th class="sortable ${filter.sort === key ? "sorted" : ""} ${extra}" data-sort="${key}" title="${title}">${label}${filter.sort === key ? " ▾" : ""}</th>`;
   const head = `<tr><th>#</th><th class="l">Player</th><th class="l">Pos</th><th class="l">Tm</th>${sth("score", "Score", "Value for your team right now. Click to sort")}
     ${cols.map(c => sth(c.key, esc(c.name), `Sort by ${esc(c.name)}`, c.punted ? "punted" : "")).join("")}
-    ${sth("adp", "ADP", "ESPN average draft position. Click to sort")}<th></th></tr>`;
+    ${sth("rank", "ESPN", "ESPN's own ranking, the order its draft room lists players in. Click to sort")}${sth("adp", "ADP", "ESPN average draft position. Click to sort")}<th></th></tr>`;
   const drops = dropOffs();
   const weak = weakestCat();
   const body = shown.map((p, i) => {
@@ -423,7 +439,7 @@ function boardView() {
     return `<tr class="${i < 3 && filter.pos === "ALL" && !filter.q && filter.sort === "score" ? "top" : ""}${selected && selected.id === p.id ? " selrow" : ""}">
       <td class="muted">${i + 1}</td><td class="l"><span class="name sel" data-sel="${p.id}" title="Show what he adds to your team on the chart">${esc(p.name)}</span>${tags.join("")}</td>
       <td class="l">${esc(p.pos.join(", "))}</td><td class="l muted">${esc(p.team)}</td><td><b>${p.score.toFixed(1)}</b></td>
-      ${stats}<td class="muted">${p.adp ? Math.round(p.adp) : "–"}</td>
+      ${stats}<td class="muted">${p.rank ?? "–"}</td><td class="muted">${p.adp ? Math.round(p.adp) : "–"}</td>
       <td><div class="actions"><button class="small" data-mine="${p.id}" title="I drafted him">Mine</button><button class="small" data-taken="${p.id}" title="Another team drafted him">Taken</button></div></td>
     </tr>`;
   }).join("");
@@ -451,6 +467,28 @@ function rosterView() {
   const items = r.map(p => `<li><span><span class="name">${esc(p.name)}</span>${p.injury ? `<span class="tag inj">${esc(p.injury.toLowerCase())}</span>` : ""}</span><span class="muted">${esc(p.pos.join(", "))} · ${esc(p.team)}</span></li>`).join("");
   return `<div class="panel roster"><h2>Your team · ${r.length}/${S.league.rounds}</h2>
     ${r.length ? `<ul>${items}</ul>` : `<p class="muted">No players yet.</p>`}</div>`;
+}
+async function loadDepth(id) {
+  try {
+    const r = await fetch(`/api/depth?id=${id}`);
+    const d = await r.json();
+    if (selected && selected.id === id) { depth = d.error ? { id, error: d.error } : d; render(); }
+  } catch (e) { if (selected && selected.id === id) { depth = { id, error: "Couldn't load the depth chart." }; render(); } }
+}
+// Depth chart of the selected player's NBA team: starters in bold, him highlighted,
+// players already drafted crossed out (yours in amber).
+function depthView() {
+  if (!selected) return "";
+  if (!depth || depth.id !== selected.id) return `<div class="panel"><h2>${esc(selected.team)} depth chart</h2><p class="hint">Loading…</p></div>`;
+  if (depth.error) return `<div class="panel"><h2>${esc(selected.team)} depth chart</h2><p class="hint">${esc(depth.error)}</p></div>`;
+  const cols = depth.positions.map(pos => `<div><h3>${pos.pos}</h3><ol>${pos.players.slice(0, 6).map((a, i) => {
+    const cls = [i === 0 ? "start" : "", a.selected ? "selp" : "", a.status === "taken" ? "taken" : "", a.status === "mine" ? "mine" : ""].join(" ");
+    const title = a.status === "taken" ? `Drafted by ${a.owner}` : a.status === "mine" ? "On your team" : a.injury ? a.injury : "";
+    return `<li class="${cls}" title="${esc(title)}">${esc(a.name)}${a.injury ? ` <span class="tag inj">${esc(a.injury.toLowerCase())}</span>` : ""}</li>`;
+  }).join("")}</ol></div>`).join("");
+  return `<div class="panel"><h2>${esc(depth.team)} depth chart · ${esc(depth.name)} <button class="small" id="clearSel2" style="float:right">Close</button></h2>
+    <div class="depth">${cols}</div>
+    <p class="hint">ESPN's depth chart. Starters in bold, ${esc(depth.name)} highlighted, drafted players crossed out (yours in amber).</p></div>`;
 }
 async function loadDetail(id) {
   try {
@@ -568,7 +606,7 @@ function bindBoard() {
     const id = +el.dataset.sel;
     selected = selected && selected.id === id ? null : S.suggestions.find(p => p.id === id) || null;
     render();
-    if (selected) loadDetail(selected.id);
+    if (selected) { loadDetail(selected.id); loadDepth(selected.id); }
     if (selected && window.innerWidth <= 1000) { const r = $(".radar"); if (r) r.scrollIntoView({ behavior: "smooth" }); }
   });
   document.querySelectorAll("[data-sort]").forEach(th => th.onclick = () => {
@@ -578,8 +616,10 @@ function bindBoard() {
     filter.sort = el.dataset.sortcat; filter.limit = 40; render(); window.scrollTo({ top: 0, behavior: "smooth" });
   });
   const wk = $("#weakest"); if (wk) wk.onclick = () => { const w = weakestCat(); filter.sort = filter.sort === String(w.id) ? "score" : String(w.id); filter.limit = 40; render(); };
+  document.querySelectorAll("[data-scar]").forEach(b => b.onclick = () => { scarOrder = b.dataset.scar; render(); });
   const rs = $("#resetSort"); if (rs) rs.onclick = () => { filter.sort = "score"; render(); };
-  const clr = $("#clearSel"); if (clr) clr.onclick = () => { selected = detail = null; render(); };
+  const clr = $("#clearSel"); if (clr) clr.onclick = () => { selected = detail = depth = null; render(); };
+  const clr2 = $("#clearSel2"); if (clr2) clr2.onclick = () => { selected = detail = depth = null; render(); };
   document.querySelectorAll("[data-taken]").forEach(b => b.onclick = () => pick(+b.dataset.taken, false));
   const more = $("#more"); if (more) more.onclick = () => { filter.limit += 60; render(); };
   $("#undo").onclick = () => act("/api/undo", {}, "Undone");
@@ -626,7 +666,7 @@ function apply(s) {
   if (s.unchanged) { if (S) { S.last_poll = s.last_poll; S.poll_error = s.poll_error; updateStatus(); } return; }
   S = s; version = s.version;
   // Drop the preview once he's off the board (drafted by anyone).
-  if (selected && !(S.suggestions || []).some(p => p.id === selected.id)) selected = detail = null;
+  if (selected && !(S.suggestions || []).some(p => p.id === selected.id)) selected = detail = depth = null;
   const myTurn = !!(S.clock && S.clock.my_turn);
   if (myTurn && !wasMyTurn) beep();
   wasMyTurn = myTurn;

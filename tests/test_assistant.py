@@ -297,3 +297,14 @@ def test_player_detail_lists_each_source():
     d = app.player_detail(p.id)
     assert [r["source"] for r in d["rows"]] == ["ESPN", "FantasyPros", "Average"]
     assert d["rows"][1]["stats"]["0"] == 10.0 and d["rows"][-1]["average"]
+
+
+def test_parse_depth_chart():
+    from draft_assistant.depth import parse_depth
+
+    data = {"depthchart": [{"positions": {"pg": {"athletes": [{"id": "1", "displayName": "A"},
+                                                              {"id": "2", "displayName": "B", "injuries": [{"status": "Out"}]}]},
+                                          "c": {"athletes": [{"id": "3", "displayName": "C"}]}}}]}
+    out = parse_depth(data)
+    assert [p["pos"] for p in out] == ["PG", "SG", "SF", "PF", "C"]
+    assert out[0]["players"][1] == {"id": 2, "name": "B", "injury": "Out"} and out[4]["players"][0]["id"] == 3

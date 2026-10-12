@@ -62,6 +62,11 @@ def make_handler(app: App):
                 return self._json(app.snapshot())
             if url.path == "/api/search":
                 return self._json(app.search(query.get("q", [""])[0]))
+            if url.path == "/api/depth":
+                try:
+                    return self._json(app.depth_chart(int(query.get("id", [""])[0])))
+                except ValueError as exc:
+                    return self._json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
             if url.path == "/api/player":
                 pid = query.get("id", [""])[0]
                 try:
