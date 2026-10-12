@@ -200,3 +200,8 @@ def test_helpers():
     from datetime import date
     assert default_season(date(2026, 10, 12)) == 2027
     assert default_season(date(2027, 3, 1)) == 2027
+
+
+def test_parse_players_accepts_bare_list():
+    bare = [e["player"] for e in PLAYERS_JSON["players"]]
+    assert [p.name for p in parse_players(bare, 2027)] == ["Nikola Jokić", "Rookie Guy"]

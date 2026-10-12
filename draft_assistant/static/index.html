@@ -211,6 +211,7 @@ function renderBanners() {
   if (S.league && S.my_team_id == null) {
     b.push(`<div class="banner warn row"><b>Which team is yours?</b> ${teamSelect("bannerTeam")} <span class="hint">Needed to track your roster and your picks.</span></div>`);
   }
+  if (S.league && S.mode === "espn" && S.with_stats < 100) b.push(`<div class="banner warn">ESPN only sent stats for ${S.with_stats} players, so rankings may be thin. Try Settings → Re-download players.</div>`);
   if (S.league && !S.league.has_order) b.push(`<div class="banner warn">ESPN hasn't set the draft order yet, so whose turn it is is unknown. It appears once the league manager sets it.</div>`);
   $("#banners").innerHTML = b.join("");
   const sel = $("#bannerTeam"); if (sel) sel.onchange = () => act("/api/settings", { team_id: sel.value }, "Saved your team");

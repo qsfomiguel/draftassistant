@@ -281,6 +281,7 @@ class App:
                 "standings": self._category_standings(),
                 "picks": picks,
                 "can_undo": bool(state.manual_picks),
+                "with_stats": sum(1 for p in state.players.values() if p.avg),
             })
             return base
 

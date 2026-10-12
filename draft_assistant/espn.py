@@ -51,15 +51,19 @@ class EspnClient:
         except ValueError as exc:
             # ESPN serves an HTML login page instead of JSON when cookies are wrong.
             raise EspnError("ESPN did not return JSON; check espn_s2 / swid.") from exc
+        return data
+
+    def _get_league(self, views: list[str]) -> dict:
+        data = self._get(views)
         if isinstance(data, list):  # some views wrap the league in a list
             data = data[0]
         return data
 
     def league_raw(self) -> dict:
-        return self._get(["mSettings", "mTeam", "mDraftDetail"])
+        return self._get_league(["mSettings", "mTeam", "mDraftDetail"])
 
     def draft_raw(self) -> dict:
-        return self._get(["mDraftDetail"])
+        return self._get_league(["mDraftDetail"])
 
     def players_raw(self, limit: int = 600) -> dict:
         s = self.season
@@ -148,7 +152,9 @@ def _pick_stats(stats: list[dict], season: int) -> tuple[dict | None, str]:
 
 def parse_players(data: dict, season: int) -> list[Player]:
     players = []
-    for entry in data.get("players", []):
+    # The league endpoint wraps players in {"players": [...]}; ESPN's public endpoint returns a bare list.
+    entries = data if isinstance(data, list) else data.get("players", [])
+    for entry in entries:
         p = entry.get("player", entry)
         stats_entry, source = _pick_stats(p.get("stats", []) or [], season)
         avg: dict[int, float] = {}
