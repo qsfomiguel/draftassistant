@@ -285,3 +285,15 @@ def test_snapshot_has_every_teams_category_totals():
     s = app.snapshot()
     assert set(s["team_totals"]) == {str(t["id"]) for t in s["league"]["teams"]}
     assert all(set(t) == {str(c["id"]) for c in s["league"]["categories"]} for t in s["team_totals"].values())
+
+
+def test_player_detail_lists_each_source():
+    from draft_assistant.projections import Projection, SourceResult, blend
+
+    app = demo_app()
+    p = next(iter(app.state.players.values()))
+    p.stat_source = "proj"
+    blend([p], [SourceResult("fantasypros", [Projection(p.name, p.pro_team, 70, {0: 10.0})])])
+    d = app.player_detail(p.id)
+    assert [r["source"] for r in d["rows"]] == ["ESPN", "FantasyPros", "Average"]
+    assert d["rows"][1]["stats"]["0"] == 10.0 and d["rows"][-1]["average"]

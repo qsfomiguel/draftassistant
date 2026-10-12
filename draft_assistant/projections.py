@@ -257,6 +257,9 @@ def blend(players: list[Player], results: list[SourceResult]) -> dict:
     for p in players:
         outside = matched.get(p.id)
         p.sources = ["espn"] if p.stat_source == "proj" else []
+        # Keep each source's own numbers so the page can show where they disagree.
+        p.by_source = {"espn": (p.gp, dict(p.avg))} if p.stat_source == "proj" else {}
+        p.by_source.update({name: (proj.gp, proj.avg) for name, proj in outside or []})
         if not outside:
             continue
         _blend_player(p, outside)

@@ -62,6 +62,12 @@ def make_handler(app: App):
                 return self._json(app.snapshot())
             if url.path == "/api/search":
                 return self._json(app.search(query.get("q", [""])[0]))
+            if url.path == "/api/player":
+                pid = query.get("id", [""])[0]
+                try:
+                    return self._json(app.player_detail(int(pid)))
+                except ValueError as exc:
+                    return self._json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self):

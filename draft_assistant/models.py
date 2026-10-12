@@ -19,6 +19,7 @@ class Player:
     espn_rank: int | None = None
     stat_source: str = "none"  # "proj", "last", "current" or "none"
     sources: list[str] = field(default_factory=list)  # projection sources averaged into avg
+    by_source: dict[str, tuple[float | None, dict[int, float]]] = field(default_factory=dict)  # (gp, per-game) each
 
 
 @dataclass

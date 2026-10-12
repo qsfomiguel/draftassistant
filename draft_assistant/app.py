@@ -5,6 +5,7 @@ import threading
 import time
 
 from . import demo
+from .constants import PERCENT_STATS, STAT_NAMES
 from .config import CACHE_DIR, Config, normalize_espn_s2, normalize_swid, parse_punt, save_config
 from .draft import DraftState, suggest
 from .espn import EspnClient, EspnError, find_my_team, parse_league, parse_picks, parse_players
@@ -295,6 +296,36 @@ class App:
                 "projections": self.projections if self.mode == "espn" else {},
             })
             return base
+
+    def player_detail(self, player_id: int) -> dict:
+        """One player's projection from each source next to the average the rankings use."""
+        with self.lock:
+            if not self.state or player_id not in self.state.players:
+                raise ValueError("Unknown player.")
+            p, lg = self.state.players[player_id], self.state.league
+            stat_ids = [c.stat_id for c in lg.categories] if lg.categories else [0, 6, 3, 2, 1, 17, 19, 20, 11]
+
+            def stats(avg: dict[int, float]) -> dict[str, float | None]:
+                out = {}
+                for sid in stat_ids:
+                    if sid in avg:
+                        out[str(sid)] = round(avg[sid], 3)
+                    elif sid in PERCENT_STATS and avg.get(PERCENT_STATS[sid][1]):
+                        made, att = PERCENT_STATS[sid]
+                        out[str(sid)] = round(avg.get(made, 0.0) / avg[att], 3)
+                    else:
+                        out[str(sid)] = None
+                return out
+
+            rows = [{"source": LABELS.get(name, name), "gp": round(gp) if gp else None, "stats": stats(avg)}
+                    for name, (gp, avg) in p.by_source.items()]
+            label = {"proj": "Average", "last": "ESPN (last season)", "current": "ESPN (this season)"}.get(p.stat_source, "–")
+            if len(rows) < 2:
+                rows = []
+                label = "ESPN" if p.stat_source == "proj" else label
+            rows.append({"source": label, "gp": round(p.gp) if p.gp else None, "stats": stats(p.avg), "average": True})
+            return {"id": p.id, "name": p.name, "stat_ids": [str(s) for s in stat_ids],
+                    "names": {str(s): STAT_NAMES.get(s, str(s)) for s in stat_ids}, "rows": rows}
 
     def search(self, query: str) -> list[dict]:
         with self.lock:

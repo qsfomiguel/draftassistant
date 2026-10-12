@@ -39,7 +39,7 @@ header .spacer { flex: 1; }
 .pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; background: var(--chip); color: var(--muted); }
 .pill.live { color: var(--good); }
 .pill.err { color: var(--bad); }
-main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; padding: 16px 20px; max-width: 1600px; margin: 0 auto; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 16px; padding: 16px 20px; max-width: 1600px; margin: 0 auto; }
 @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
 .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; }
@@ -103,6 +103,24 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
   .radar .me { fill: #5b8def; stroke: #8fb3ff; }
   .radar .plus { stroke: #4ade80; fill: #4ade80; }
 }
+.srcs { width: 100%; margin-top: 10px; font-size: 12px; }
+.srcs th, .srcs td { padding: 3px 3px; }
+.srcs tr.avg td { font-weight: 700; border-top: 2px solid var(--line); }
+.srcs td.hi { color: var(--good); }
+.srcs td.lo { color: var(--bad); }
+.srcs td.split { background: color-mix(in srgb, var(--warn) 18%, transparent); }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--accent); }
+th.sorted { color: var(--accent); }
+.tag.drop { color: #fff; background: var(--warn); }
+.scar { display: grid; grid-template-columns: 44px 1fr auto; gap: 5px 8px; align-items: center; font-size: 12px; }
+.scar .cn { font-weight: 600; cursor: pointer; }
+.scar .cn:hover { color: var(--accent); }
+.scar .what { color: var(--muted); grid-column: 2 / 4; margin-top: -3px; }
+.scar .lvl { font-size: 11px; padding: 0 6px; border-radius: 4px; }
+.scar .lvl.scarce { background: var(--bad); color: #fff; }
+.scar .lvl.drying { background: var(--warn); color: #fff; }
+.scar .lvl.ok { background: var(--chip); color: var(--muted); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin-top: 6px; }
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; }
 .selrow td { background: color-mix(in srgb, #22a06b 14%, transparent) !important; }
@@ -152,9 +170,10 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 let S = null;            // latest full state
 let version = null;
-let filter = { pos: "ALL", q: "", hideInjured: false, limit: 40 };
+let filter = { pos: "ALL", q: "", hideInjured: false, limit: 40, sort: "score" };  // sort: "score", "adp" or a category id
 let wasMyTurn = false;
 let selected = null;      // player picked to preview on the team chart
+let detail = null;        // that player's projections by source, from /api/player
 
 async function api(path, body) {
   const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
@@ -202,7 +221,7 @@ function render() {
   const focused = document.activeElement && document.activeElement.id;
   root.innerHTML = `<main>
     <div class="stack">${clockView()}${boardView()}</div>
-    <div class="stack">${S.league.is_points ? standingsView() : radarView()}${rosterView()}${logView()}</div>
+    <div class="stack">${S.league.is_points ? standingsView() : radarView() + scarcityView()}${rosterView()}${logView()}</div>
   </main>`;
   bindBoard();
   if (focused === "search") { const el = $("#search"); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
@@ -311,32 +330,97 @@ function statCols() {
 }
 function filtered() {
   const q = filter.q.trim().toLowerCase();
-  return S.suggestions.filter(p =>
+  const rows = S.suggestions.filter(p =>
     (filter.pos === "ALL" || p.pos.includes(filter.pos)) &&
     (!filter.hideInjured || !p.injury) &&
     (!q || p.name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").includes(q)));
+  const k = filter.sort;
+  if (k === "adp") return rows.slice().sort((a, b) => (a.adp ?? 999) - (b.adp ?? 999));
+  if (k !== "score") return rows.slice().sort((a, b) => (b.cats[k] ?? b[k] ?? -99) - (a.cats[k] ?? a[k] ?? -99));
+  return rows;
+}
+// My lowest-ranked category on the team chart (ignoring punts), to sort the list by.
+function weakestCat() {
+  const lg = S.league;
+  if (lg.is_points || !S.roster.length) return null;
+  const mine = (S.team_totals || {})[String(S.my_team_id)] || {};
+  const cats = lg.categories.filter(c => !c.punted && S.standings[String(c.id)]);
+  cats.sort((a, b) => S.standings[String(b.id)].rank - S.standings[String(a.id)].rank || (mine[String(a.id)] || 0) - (mine[String(b.id)] || 0));
+  return cats[0] || null;
+}
+// Positions where the best available player is clearly better than the best one you can expect
+// at your next pick (the first at that position ADP doesn't flag as "gone soon").
+// Returns player id -> {pos, next, gap}.
+function dropOffs() {
+  const out = {};
+  for (const pos of ["PG", "SG", "SF", "PF", "C"]) {
+    const list = S.suggestions.filter(p => p.pos.includes(pos)).sort((a, b) => b.value - a.value);
+    const top = list[0], next = list.slice(1).find(p => p.lasts !== false);
+    if (!top || !next || top.value <= 0 || out[top.id]) continue;
+    const gap = top.value - next.value;
+    if (gap >= Math.max(1.5, 0.3 * top.value)) out[top.id] = { pos, next, gap };
+  }
+  return out;
+}
+// For each category: how many of the next 20 players on the list are good at it (z >= +0.5),
+// and how many in the 20 after that, to spot categories that are about to dry up.
+function scarcityView() {
+  const lg = S.league;
+  if (lg.is_points) return "";
+  const board = S.suggestions, GOOD = 0.5;
+  const rows = lg.categories.map(c => {
+    const id = String(c.id);
+    const now = board.slice(0, 20), later = board.slice(20, 40);
+    const good = now.filter(p => (p.cats[id] ?? 0) >= GOOD).length;
+    const goodLater = later.filter(p => (p.cats[id] ?? 0) >= GOOD).length;
+    const best = board.slice().sort((a, b) => (b.cats[id] ?? -99) - (a.cats[id] ?? -99))[0];
+    return { c, id, good, goodLater, best };
+  });
+  // Every category gets thinner further down the list, so "drying up" means thinning
+  // noticeably faster than the typical category does.
+  const ratios = rows.filter(r => !r.c.punted).map(r => r.goodLater / Math.max(r.good, 1)).sort((a, b) => a - b);
+  const typical = ratios.length ? ratios[Math.floor(ratios.length / 2)] : 1;
+  for (const r of rows) {
+    const ratio = r.goodLater / Math.max(r.good, 1);
+    r.lvl = r.c.punted ? ["ok", "punted"] : r.good <= 3 ? ["scarce", "scarce"]
+      : ratio < 0.6 * typical ? ["drying", "drying up"] : r.good <= 6 ? ["drying", "thin"] : ["ok", "plenty"];
+  }
+  const order = { scarce: 0, drying: 1, ok: 2 };
+  rows.sort((a, b) => (a.c.punted - b.c.punted) || order[a.lvl[0]] - order[b.lvl[0]] || a.good - b.good);
+  const html = rows.map(r => `<span class="cn ${r.c.punted ? "muted" : ""}" data-sortcat="${r.id}" title="Sort the list by ${esc(r.c.name)}">${esc(r.c.name)}</span>
+    <div class="bar" title="${r.good} of the next 20 are good at ${esc(r.c.name)}"><div style="width:${r.good / 20 * 100}%;background:${r.lvl[0] === "scarce" ? "var(--bad)" : r.lvl[0] === "drying" ? "var(--warn)" : "var(--good)"}"></div></div>
+    <span class="lvl ${r.lvl[0]}">${r.lvl[1]}</span>
+    <span class="what">${r.good}/20 good now · ${r.goodLater}/20 in the 20 after${r.best ? ` · best: ${esc(r.best.name)} ${(r.best.cats[r.id] > 0 ? "+" : "")}${(r.best.cats[r.id] ?? 0).toFixed(1)}` : ""}</span>`).join("");
+  return `<div class="panel"><h2>Category scarcity · next 20 on the list</h2><div class="scar">${html}</div>
+    <p class="hint">"Good" means at least +0.5 in that category. <b>Scarce</b>: 3 or fewer good players left in the next 20, so grab one soon if you need it. <b>Thin</b>: only 4–6. <b>Drying up</b>: thinning out faster further down the list than the other categories. Click a category to sort the list by it.</p></div>`;
 }
 function boardView() {
   const cols = statCols();
   const rows = filtered();
   const shown = rows.slice(0, filter.limit);
   const pos = ["ALL", "PG", "SG", "SF", "PF", "C"].map(p => `<button data-pos="${p}" class="${filter.pos === p ? "on" : ""}">${p === "ALL" ? "All" : p}</button>`).join("");
-  const head = `<tr><th>#</th><th class="l">Player</th><th class="l">Pos</th><th class="l">Tm</th><th title="Value for your team right now">Score</th>
-    ${cols.map(c => `<th class="${c.punted ? "punted" : ""}">${esc(c.name)}</th>`).join("")}
-    <th title="ESPN average draft position">ADP</th><th></th></tr>`;
+  const sth = (key, label, title, extra = "") =>
+    `<th class="sortable ${filter.sort === key ? "sorted" : ""} ${extra}" data-sort="${key}" title="${title}">${label}${filter.sort === key ? " ▾" : ""}</th>`;
+  const head = `<tr><th>#</th><th class="l">Player</th><th class="l">Pos</th><th class="l">Tm</th>${sth("score", "Score", "Value for your team right now. Click to sort")}
+    ${cols.map(c => sth(c.key, esc(c.name), `Sort by ${esc(c.name)}`, c.punted ? "punted" : "")).join("")}
+    ${sth("adp", "ADP", "ESPN average draft position. Click to sort")}<th></th></tr>`;
+  const drops = dropOffs();
+  const weak = weakestCat();
   const body = shown.map((p, i) => {
     const tags = [];
     if (p.injury) tags.push(`<span class="tag inj">${esc(p.injury.replace("_", " ").toLowerCase())}</span>`);
     if (p.lasts === true) tags.push(`<span class="tag last" title="ADP says he'll likely still be there at your next pick">may last</span>`);
     if (p.lasts === false) tags.push(`<span class="tag gone" title="ADP says he'll likely be gone before your next pick">gone soon</span>`);
     if (!p.fits) tags.push(`<span class="tag bench" title="Your starting slots for his positions are full">bench</span>`);
+    const d = drops[p.id];
+    if (d) tags.push(`<span class="tag drop" title="Best ${d.pos} left. The best ${d.pos} likely still there at your next pick is ${esc(d.next.name)}, ${d.gap.toFixed(1)} value lower">last good ${d.pos}</span>`);
     if (p.sources && p.sources.length > 1) tags.push(`<span class="tag" title="Projection averaged from ${esc(p.sources.join(", "))}">${p.sources.length} src</span>`);
     if (p.source === "last") tags.push(`<span class="tag" title="No projection yet; using last season">no proj</span>`);
     const stats = cols.map(c => {
       if (c.cat) { const z = p.cats[c.key]; return `<td class="z ${c.punted ? "punted" : ""}" style="${zStyle(z, c.punted)}">${z == null ? "" : (z > 0 ? "+" : "") + z.toFixed(1)}</td>`; }
       return `<td>${p[c.key] ?? "–"}</td>`;
     }).join("");
-    return `<tr class="${i < 3 && filter.pos === "ALL" && !filter.q ? "top" : ""}${selected && selected.id === p.id ? " selrow" : ""}">
+    return `<tr class="${i < 3 && filter.pos === "ALL" && !filter.q && filter.sort === "score" ? "top" : ""}${selected && selected.id === p.id ? " selrow" : ""}">
       <td class="muted">${i + 1}</td><td class="l"><span class="name sel" data-sel="${p.id}" title="Show what he adds to your team on the chart">${esc(p.name)}</span>${tags.join("")}</td>
       <td class="l">${esc(p.pos.join(", "))}</td><td class="l muted">${esc(p.team)}</td><td><b>${p.score.toFixed(1)}</b></td>
       ${stats}<td class="muted">${p.adp ? Math.round(p.adp) : "–"}</td>
@@ -350,6 +434,8 @@ function boardView() {
       <input type="text" id="search" placeholder="Search players  ( / )" value="${esc(filter.q)}" style="min-width:220px">
       <span class="chips">${pos}</span>
       <label class="hint"><input type="checkbox" id="hideInj" ${filter.hideInjured ? "checked" : ""}> hide injured</label>
+      ${weak ? `<button id="weakest" class="${filter.sort === String(weak.id) ? "primary" : ""}" title="Your lowest rank on the team chart is ${esc(weak.name)} (${ordinal(S.standings[String(weak.id)].rank)})">Help my weakest: ${esc(weak.name)}</button>` : ""}
+      ${filter.sort !== "score" ? `<button id="resetSort" title="Back to the recommended order">Reset order</button>` : ""}
       <span class="spacer" style="flex:1"></span>
       <button id="undo" ${S.can_undo ? "" : "disabled"} title="Remove the last pick you entered here">Undo</button>
       <button id="auto" title="Practice: other teams take the best player by ADP until your turn">Auto-pick to my turn</button>
@@ -365,6 +451,35 @@ function rosterView() {
   const items = r.map(p => `<li><span><span class="name">${esc(p.name)}</span>${p.injury ? `<span class="tag inj">${esc(p.injury.toLowerCase())}</span>` : ""}</span><span class="muted">${esc(p.pos.join(", "))} · ${esc(p.team)}</span></li>`).join("");
   return `<div class="panel roster"><h2>Your team · ${r.length}/${S.league.rounds}</h2>
     ${r.length ? `<ul>${items}</ul>` : `<p class="muted">No players yet.</p>`}</div>`;
+}
+async function loadDetail(id) {
+  try {
+    const r = await fetch(`/api/player?id=${id}`);
+    const d = await r.json();
+    if (selected && selected.id === id && !d.error) { detail = d; render(); }
+  } catch (e) { /* the chart still works without the breakdown */ }
+}
+// Each source's projection for the selected player. Cells are green/red for the highest/lowest
+// source and amber when the sources disagree by more than 15%, a sign the projection is shaky.
+function sourcesView() {
+  if (!selected || !detail || detail.id !== selected.id) return selected ? `<p class="hint">Loading projections…</p>` : "";
+  const ids = detail.stat_ids, rows = detail.rows;
+  const pct = id => ["19", "20", "21"].includes(id);
+  const fmt = (v, id) => v == null ? "–" : pct(id) ? v.toFixed(3).replace(/^0/, "") : v.toFixed(1);
+  const srcRows = rows.filter(r => !r.average);
+  const cell = (r, key, v, txt) => {
+    if (r.average || srcRows.length < 2 || v == null) return `<td>${txt}</td>`;
+    const vals = srcRows.map(x => key === "gp" ? x.gp : x.stats[key]).filter(x => x != null);
+    const hi = Math.max(...vals), lo = Math.min(...vals), mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const split = mean && (hi - lo) / Math.abs(mean) > (key === "gp" || pct(key) ? 0.08 : 0.15);
+    const cls = [vals.length > 1 && v === hi ? "hi" : vals.length > 1 && v === lo ? "lo" : "", split ? "split" : ""].join(" ");
+    return `<td class="${cls}">${txt}</td>`;
+  };
+  const head = `<tr><th class="l">Source</th><th>GP</th>${ids.map(id => `<th>${esc(detail.names[id])}</th>`).join("")}</tr>`;
+  const body = rows.map(r => `<tr class="${r.average ? "avg" : ""}"><td class="l">${esc(r.source.replace(" Basketball", ""))}</td>${cell(r, "gp", r.gp, r.gp ?? "–")}${
+    ids.map(id => cell(r, id, r.stats[id], fmt(r.stats[id], id))).join("")}</tr>`).join("");
+  return `<div class="tablewrap"><table class="srcs">${head}${body}</table></div>
+    <p class="hint">Per-game projections by source${srcRows.length > 1 ? "; amber = sources disagree" : ""}. The bold row is what the rankings use.</p>`;
 }
 // Team strength radar: each axis runs from the weakest team (centre) to the strongest (edge) in
 // that category right now, so the shape shows where you stand against the league, not raw totals.
@@ -414,6 +529,7 @@ function radarView() {
     </svg>
     <div class="legend"><span><i style="background:#3e64a8"></i>Your team</span><span><i style="background:#f08a6b"></i>League average</span>
       ${sel ? `<span><i style="border:2px dashed #16a34a"></i>With ${esc(sel.name)}</span> <button class="small" id="clearSel">Clear</button>` : ""}</div>
+    ${sourcesView()}
     <p class="hint">Each spoke runs from the weakest team in that category (centre) to the strongest (edge), based on everyone's picks so far.
       ${empty ? "Click a player's name in the list to see what he would add." : sel ? "Ranks show where you'd move if you drafted him." : "Click a player's name to preview him."}</p></div>`;
 }
@@ -452,9 +568,18 @@ function bindBoard() {
     const id = +el.dataset.sel;
     selected = selected && selected.id === id ? null : S.suggestions.find(p => p.id === id) || null;
     render();
+    if (selected) loadDetail(selected.id);
     if (selected && window.innerWidth <= 1000) { const r = $(".radar"); if (r) r.scrollIntoView({ behavior: "smooth" }); }
   });
-  const clr = $("#clearSel"); if (clr) clr.onclick = () => { selected = null; render(); };
+  document.querySelectorAll("[data-sort]").forEach(th => th.onclick = () => {
+    filter.sort = filter.sort === th.dataset.sort && th.dataset.sort !== "score" ? "score" : th.dataset.sort; filter.limit = 40; render();
+  });
+  document.querySelectorAll("[data-sortcat]").forEach(el => el.onclick = () => {
+    filter.sort = el.dataset.sortcat; filter.limit = 40; render(); window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+  const wk = $("#weakest"); if (wk) wk.onclick = () => { const w = weakestCat(); filter.sort = filter.sort === String(w.id) ? "score" : String(w.id); filter.limit = 40; render(); };
+  const rs = $("#resetSort"); if (rs) rs.onclick = () => { filter.sort = "score"; render(); };
+  const clr = $("#clearSel"); if (clr) clr.onclick = () => { selected = detail = null; render(); };
   document.querySelectorAll("[data-taken]").forEach(b => b.onclick = () => pick(+b.dataset.taken, false));
   const more = $("#more"); if (more) more.onclick = () => { filter.limit += 60; render(); };
   $("#undo").onclick = () => act("/api/undo", {}, "Undone");
@@ -501,7 +626,7 @@ function apply(s) {
   if (s.unchanged) { if (S) { S.last_poll = s.last_poll; S.poll_error = s.poll_error; updateStatus(); } return; }
   S = s; version = s.version;
   // Drop the preview once he's off the board (drafted by anyone).
-  if (selected && !(S.suggestions || []).some(p => p.id === selected.id)) selected = null;
+  if (selected && !(S.suggestions || []).some(p => p.id === selected.id)) selected = detail = null;
   const myTurn = !!(S.clock && S.clock.my_turn);
   if (myTurn && !wasMyTurn) beep();
   wasMyTurn = myTurn;
