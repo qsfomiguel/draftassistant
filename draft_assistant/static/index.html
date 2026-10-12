@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Draft Assistant</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e5e7eb;
+  --accent: #2563eb; --accent-soft: #dbeafe; --mine: #fef3c7; --mine-strong: #d97706;
+  --good: #15803d; --bad: #b91c1c; --warn: #b45309; --chip: #f1f5f9;
+  --pos: 21, 128, 61; --neg: 185, 28, 28;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115; --panel: #171a21; --text: #e6e8ec; --muted: #9aa3af; --line: #2a2f3a;
+    --accent: #60a5fa; --accent-soft: #1e3a5f; --mine: #3a2f12; --mine-strong: #fbbf24;
+    --good: #4ade80; --bad: #f87171; --warn: #fbbf24; --chip: #232833;
+    --pos: 74, 222, 128; --neg: 248, 113, 113;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 10px; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+button.small { padding: 2px 8px; font-size: 12px; }
+button:disabled { opacity: .5; cursor: default; }
+input[type=text], input[type=password], input[type=number], select {
+  border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 6px 8px; }
+header { display: flex; align-items: center; gap: 12px; padding: 10px 20px; background: var(--panel);
+  border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; }
+header .meta { color: var(--muted); }
+header .spacer { flex: 1; }
+.pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; background: var(--chip); color: var(--muted); }
+.pill.live { color: var(--good); }
+.pill.err { color: var(--bad); }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; padding: 16px 20px; max-width: 1600px; margin: 0 auto; }
+@media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; }
+.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.banner { padding: 10px 14px; border-radius: 8px; margin: 12px 20px 0; border: 1px solid var(--line); background: var(--panel); }
+.banner.err { border-color: var(--bad); color: var(--bad); }
+.banner.warn { border-color: var(--warn); }
+.clock { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+.clock .big { font-size: 26px; font-weight: 700; }
+.clock .sub { color: var(--muted); }
+.clock.myturn { background: var(--mine); border-color: var(--mine-strong); }
+.clock.myturn .big { color: var(--mine-strong); }
+.progress { height: 4px; background: var(--chip); border-radius: 2px; overflow: hidden; margin-top: 10px; }
+.progress div { height: 100%; background: var(--accent); }
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.chips button { border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+.chips button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 6px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+td.l, th.l { text-align: left; }
+th.punted, td.punted { opacity: .35; }
+tr.top td { background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
+.name { font-weight: 600; }
+.tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 4px; margin-left: 4px; background: var(--chip); color: var(--muted); font-weight: 500; }
+.tag.inj { color: var(--bad); }
+.tag.last { color: var(--accent); }
+.tag.gone { color: var(--warn); }
+.tag.bench { color: #a855f7; }
+.z { border-radius: 4px; }
+.actions { display: flex; gap: 4px; justify-content: flex-end; }
+.roster li, .log li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); list-style: none; }
+.roster ul, .log ul { margin: 0; padding: 0; }
+.log { max-height: 360px; overflow-y: auto; }
+.log li.mine { background: var(--mine); }
+.muted { color: var(--muted); }
+.cats { display: grid; grid-template-columns: 56px 1fr 44px; gap: 4px 8px; align-items: center; }
+.bar { height: 8px; background: var(--chip); border-radius: 4px; overflow: hidden; }
+.bar div { height: 100%; border-radius: 4px; }
+dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); padding: 20px; width: min(520px, 92vw); }
+dialog::backdrop { background: rgba(0,0,0,.4); }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.field label { font-size: 12px; color: var(--muted); }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.setup { max-width: 520px; margin: 60px auto; }
+.hint { font-size: 12px; color: var(--muted); }
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg);
+  padding: 8px 16px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.toast.show { opacity: .95; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Draft Assistant</h1>
+  <span class="meta" id="meta"></span>
+  <span class="spacer"></span>
+  <span class="pill" id="status">Loading…</span>
+  <button id="settingsBtn">Settings</button>
+</header>
+<div id="banners"></div>
+<div id="root"></div>
+
+<dialog id="settings">
+  <h2 style="margin-top:0">Settings</h2>
+  <div id="settingsTeam"></div>
+  <div id="settingsPunt"></div>
+  <div class="field">
+    <label for="balance">Lean toward my weakest categories: <span id="balanceVal"></span></label>
+    <input type="range" id="balance" min="0" max="1" step="0.05">
+  </div>
+  <div class="field row"><label><input type="checkbox" id="live"> Follow ESPN picks live</label></div>
+  <hr style="border:0;border-top:1px solid var(--line)">
+  <h3 style="font-size:14px">ESPN league</h3>
+  <form id="leagueForm2"></form>
+  <hr style="border:0;border-top:1px solid var(--line)">
+  <div class="row">
+    <button id="refreshPlayers">Re-download players</button>
+    <button id="demo9">Practice: 9-cat demo</button>
+    <button id="demoPts">Practice: points demo</button>
+    <span class="spacer" style="flex:1"></span>
+    <button id="closeSettings" class="primary">Done</button>
+  </div>
+</dialog>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let S = null;            // latest full state
+let version = null;
+let filter = { pos: "ALL", q: "", hideInjured: false, limit: 40 };
+let wasMyTurn = false;
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const res = await fetch(path, opts);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2500);
+}
+async function act(path, body, okMsg) {
+  try { const s = await api(path, body ?? {}); apply(s); if (okMsg) toast(okMsg); return true; }
+  catch (e) { toast(e.message); await refresh(true); return false; }
+}
+
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, .18].forEach(t => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = 880; o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(.15, ctx.currentTime + t); g.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + t + .15);
+      o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + .16);
+    });
+  } catch (e) {}
+}
+
+function zStyle(z, punted) {
+  if (z == null || punted) return "";
+  const a = Math.min(Math.abs(z) / 2.5, 1) * 0.45;
+  return `background: rgba(var(${z >= 0 ? "--pos" : "--neg"}), ${a.toFixed(2)})`;
+}
+function ordinal(n) { const s = ["th","st","nd","rd"], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
+function ago(ts) { if (!ts) return ""; const s = Math.round(Date.now() / 1000 - ts); return s < 5 ? "just now" : s < 60 ? `${s}s ago` : `${Math.round(s / 60)}m ago`; }
+
+// ---------- rendering ----------
+function render() {
+  renderHeader();
+  renderBanners();
+  const root = $("#root");
+  if (!S.league) { root.innerHTML = setupView(); bindLeagueForm($("#leagueForm")); return; }
+  const scrollY = window.scrollY;
+  const focused = document.activeElement && document.activeElement.id;
+  root.innerHTML = `<main>
+    <div class="stack">${clockView()}${boardView()}</div>
+    <div class="stack">${rosterView()}${standingsView()}${logView()}</div>
+  </main>`;
+  bindBoard();
+  if (focused === "search") { const el = $("#search"); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  window.scrollTo(0, scrollY);
+}
+
+function renderHeader() {
+  const lg = S.league;
+  $("#title").textContent = lg ? lg.name : "Draft Assistant";
+  $("#meta").textContent = lg ? `${lg.scoring.replace(/_/g, " ").toLowerCase()} · ${lg.num_teams} teams · ${lg.rounds} rounds` : "";
+  updateStatus();
+  document.title = S.clock && S.clock.my_turn ? "● Your pick! · Draft Assistant" : "Draft Assistant";
+}
+function updateStatus() {
+  const st = $("#status");
+  st.className = "pill";
+  if (S.mode === "demo") { st.textContent = "Practice league"; return; }
+  if (S.mode !== "espn") { st.textContent = "Not connected"; return; }
+  if (S.poll_error) { st.className = "pill err"; st.textContent = "ESPN not responding"; st.title = S.poll_error; return; }
+  if (!S.config.live) { st.textContent = "Live updates paused"; return; }
+  st.className = "pill live"; st.textContent = `● Live · ${ago(S.last_poll)}`; st.title = "";
+}
+
+function renderBanners() {
+  const b = [];
+  if (S.error) b.push(`<div class="banner err">${esc(S.error)}</div>`);
+  if (S.poll_error) b.push(`<div class="banner err">Couldn't refresh picks from ESPN: ${esc(S.poll_error)}. Keep drafting; you can enter picks by hand below.</div>`);
+  if (S.league && S.my_team_id == null) {
+    b.push(`<div class="banner warn row"><b>Which team is yours?</b> ${teamSelect("bannerTeam")} <span class="hint">Needed to track your roster and your picks.</span></div>`);
+  }
+  if (S.league && !S.league.has_order) b.push(`<div class="banner warn">ESPN hasn't set the draft order yet, so whose turn it is is unknown. It appears once the league manager sets it.</div>`);
+  $("#banners").innerHTML = b.join("");
+  const sel = $("#bannerTeam"); if (sel) sel.onchange = () => act("/api/settings", { team_id: sel.value }, "Saved your team");
+}
+function teamSelect(id) {
+  const opts = S.league.teams.map(t => `<option value="${t.id}" ${t.id === S.my_team_id ? "selected" : ""}>${esc(t.name)}${t.slot ? ` (pick ${t.slot})` : ""}</option>`).join("");
+  return `<select id="${id}"><option value="">Choose…</option>${opts}</select>`;
+}
+
+function setupView() {
+  return `<div class="setup panel">
+    <h2>Connect your ESPN league</h2>
+    <form id="leagueForm"></form>
+    <p class="hint">No league yet? <button id="demoStart">Try a practice league</button></p>
+  </div>`;
+}
+function leagueFormHtml() {
+  const c = S.config;
+  return `
+    <div class="field"><label>League ID (the number after <code>leagueId=</code> in your league's URL)</label>
+      <input type="text" name="league_id" value="${esc(c.league_id ?? "")}" inputmode="numeric" required></div>
+    <div class="field"><label>Season (ESPN names it by the year it ends)</label>
+      <input type="number" name="season" value="${esc(c.season)}"></div>
+    <div class="field"><label>espn_s2 cookie ${c.has_cookies ? "(saved; leave blank to keep)" : "(private leagues)"}</label>
+      <input type="password" name="espn_s2" autocomplete="off"></div>
+    <div class="field"><label>SWID cookie ${c.has_cookies ? "(saved; leave blank to keep)" : "(private leagues)"}</label>
+      <input type="password" name="swid" autocomplete="off" placeholder="{XXXXXXXX-XXXX-...}"></div>
+    <p class="hint">To find the cookies: sign in at fantasy.espn.com in Chrome or Safari, open the developer tools,
+      go to Application (Chrome) or Storage (Safari) → Cookies → https://fantasy.espn.com, and copy <code>espn_s2</code> and <code>SWID</code>.
+      They're saved only in <code>config.json</code> on this computer.</p>
+    <div class="row"><button class="primary" type="submit">Connect</button>
+      ${c.has_cookies ? `<label class="hint"><input type="checkbox" name="clear_cookies"> forget saved cookies</label>` : ""}</div>`;
+}
+function bindLeagueForm(form) {
+  form.innerHTML = leagueFormHtml();
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const body = Object.fromEntries(fd.entries());
+    body.clear_cookies = fd.has("clear_cookies");
+    const btn = form.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Connecting…";
+    const ok = await act("/api/config", body, "Connected to ESPN");
+    btn.disabled = false; btn.textContent = "Connect";
+    if (ok) $("#settings").close();
+  };
+  const demo = $("#demoStart"); if (demo) demo.onclick = () => act("/api/demo", {}, "Practice league loaded");
+}
+
+function clockView() {
+  const c = S.clock;
+  if (!c.current) return `<div class="panel clock"><div class="big">Draft complete</div></div>`;
+  const pct = Math.round(((c.current - 1) / c.total) * 100);
+  const who = c.my_turn ? "You're on the clock" : c.on_clock ? `On the clock: ${esc(c.on_clock)}` : "";
+  let next = "";
+  if (c.my_turn) next = c.next_after && c.next_after !== c.current ? `After this, your next pick is #${c.next_after}` : "Your last pick";
+  else if (c.next_pick) next = `Your next pick: #${c.next_pick} · ${c.picks_away} pick${c.picks_away === 1 ? "" : "s"} away`;
+  const espn = S.mode === "espn" ? `<span class="pill">ESPN draft ${c.espn}</span>` : "";
+  return `<div class="panel ${c.my_turn ? "clock myturn" : ""}">
+    <div class="clock">
+      <div><div class="big">Pick ${c.current}</div><div class="sub">Round ${c.round} of ${S.league.rounds}</div></div>
+      <div><div class="big" style="font-size:20px">${who}</div><div class="sub">${next}</div></div>
+      <span class="spacer" style="flex:1"></span>${espn}
+    </div>
+    <div class="progress"><div style="width:${pct}%"></div></div>
+  </div>`;
+}
+
+function statCols() {
+  const lg = S.league;
+  if (lg.is_points) return [{ key: "fpg", name: "FP/G" }, { key: "gp", name: "GP" }];
+  return lg.categories.map(c => ({ key: String(c.id), name: c.name, cat: true, punted: c.punted }));
+}
+function filtered() {
+  const q = filter.q.trim().toLowerCase();
+  return S.suggestions.filter(p =>
+    (filter.pos === "ALL" || p.pos.includes(filter.pos)) &&
+    (!filter.hideInjured || !p.injury) &&
+    (!q || p.name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").includes(q)));
+}
+function boardView() {
+  const cols = statCols();
+  const rows = filtered();
+  const shown = rows.slice(0, filter.limit);
+  const pos = ["ALL", "PG", "SG", "SF", "PF", "C"].map(p => `<button data-pos="${p}" class="${filter.pos === p ? "on" : ""}">${p === "ALL" ? "All" : p}</button>`).join("");
+  const head = `<tr><th>#</th><th class="l">Player</th><th class="l">Pos</th><th class="l">Tm</th><th title="Value for your team right now">Score</th>
+    ${cols.map(c => `<th class="${c.punted ? "punted" : ""}">${esc(c.name)}</th>`).join("")}
+    <th title="ESPN average draft position">ADP</th><th></th></tr>`;
+  const body = shown.map((p, i) => {
+    const tags = [];
+    if (p.injury) tags.push(`<span class="tag inj">${esc(p.injury.replace("_", " ").toLowerCase())}</span>`);
+    if (p.lasts === true) tags.push(`<span class="tag last" title="ADP says he'll likely still be there at your next pick">may last</span>`);
+    if (p.lasts === false) tags.push(`<span class="tag gone" title="ADP says he'll likely be gone before your next pick">gone soon</span>`);
+    if (!p.fits) tags.push(`<span class="tag bench" title="Your starting slots for his positions are full">bench</span>`);
+    if (p.source === "last") tags.push(`<span class="tag" title="No projection yet; using last season">no proj</span>`);
+    const stats = cols.map(c => {
+      if (c.cat) { const z = p.cats[c.key]; return `<td class="z ${c.punted ? "punted" : ""}" style="${zStyle(z, c.punted)}">${z == null ? "" : (z > 0 ? "+" : "") + z.toFixed(1)}</td>`; }
+      return `<td>${p[c.key] ?? "–"}</td>`;
+    }).join("");
+    return `<tr class="${i < 3 && filter.pos === "ALL" && !filter.q ? "top" : ""}">
+      <td class="muted">${i + 1}</td><td class="l"><span class="name">${esc(p.name)}</span>${tags.join("")}</td>
+      <td class="l">${esc(p.pos.join(", "))}</td><td class="l muted">${esc(p.team)}</td><td><b>${p.score.toFixed(1)}</b></td>
+      ${stats}<td class="muted">${p.adp ? Math.round(p.adp) : "–"}</td>
+      <td><div class="actions"><button class="small" data-mine="${p.id}" title="I drafted him">Mine</button><button class="small" data-taken="${p.id}" title="Another team drafted him">Taken</button></div></td>
+    </tr>`;
+  }).join("");
+  const more = rows.length > shown.length ? `<div style="text-align:center;margin-top:10px"><button id="more">Show more (${rows.length - shown.length})</button></div>` : "";
+  return `<div class="panel">
+    <h2>Best available for you</h2>
+    <div class="toolbar">
+      <input type="text" id="search" placeholder="Search players  ( / )" value="${esc(filter.q)}" style="min-width:220px">
+      <span class="chips">${pos}</span>
+      <label class="hint"><input type="checkbox" id="hideInj" ${filter.hideInjured ? "checked" : ""}> hide injured</label>
+      <span class="spacer" style="flex:1"></span>
+      <button id="undo" ${S.can_undo ? "" : "disabled"} title="Remove the last pick you entered here">Undo</button>
+      <button id="auto" title="Practice: other teams take the best player by ADP until your turn">Auto-pick to my turn</button>
+    </div>
+    <p class="hint" style="margin-top:0">Picks come in from ESPN on their own. Use <b>Mine</b> / <b>Taken</b> only if ESPN lags, or to practice.</p>
+    <div class="tablewrap"><table><thead>${head}</thead><tbody>${body || `<tr><td colspan="99" class="l muted">No players match.</td></tr>`}</tbody></table></div>
+    ${more}
+  </div>`;
+}
+
+function rosterView() {
+  const r = S.roster;
+  const items = r.map(p => `<li><span><span class="name">${esc(p.name)}</span>${p.injury ? `<span class="tag inj">${esc(p.injury.toLowerCase())}</span>` : ""}</span><span class="muted">${esc(p.pos.join(", "))} · ${esc(p.team)}</span></li>`).join("");
+  return `<div class="panel roster"><h2>Your team · ${r.length}/${S.league.rounds}</h2>
+    ${r.length ? `<ul>${items}</ul>` : `<p class="muted">No players yet.</p>`}</div>`;
+}
+function standingsView() {
+  const st = S.standings, lg = S.league;
+  if (!S.roster.length || !Object.keys(st).length) return "";
+  const n = lg.num_teams;
+  const color = rank => rank <= Math.ceil(n / 3) ? "var(--good)" : rank > n - Math.ceil(n / 3) ? "var(--bad)" : "var(--warn)";
+  let rows;
+  if (lg.is_points) {
+    const s = st.fpg;
+    rows = `<span>FP/G</span><div class="bar"><div style="width:${((n - s.rank + 1) / n) * 100}%;background:${color(s.rank)}"></div></div><span>${ordinal(s.rank)}</span>`;
+  } else {
+    rows = lg.categories.map(c => {
+      const s = st[String(c.id)]; if (!s) return "";
+      return `<span class="${c.punted ? "punted muted" : ""}">${esc(c.name)}</span>
+        <div class="bar"><div style="width:${((n - s.rank + 1) / n) * 100}%;background:${c.punted ? "var(--muted)" : color(s.rank)}"></div></div>
+        <span class="muted">${ordinal(s.rank)}</span>`;
+    }).join("");
+  }
+  return `<div class="panel"><h2>Where you rank so far</h2><div class="cats">${rows}</div>
+    <p class="hint">Your drafted players' category totals compared with every other team's.</p></div>`;
+}
+function logView() {
+  const items = S.picks.slice().reverse().map(p => `<li class="${p.mine ? "mine" : ""}"><span><span class="muted">#${p.overall}</span> <span class="name">${esc(p.player)}</span>${p.manual ? `<span class="tag">entered</span>` : ""}${p.keeper ? `<span class="tag">keeper</span>` : ""}</span><span class="muted">${p.mine ? "You" : esc(p.team)}</span></li>`).join("");
+  return `<div class="panel log"><h2>Draft log</h2>${items ? `<ul>${items}</ul>` : `<p class="muted">No picks yet.</p>`}</div>`;
+}
+
+function bindBoard() {
+  const s = $("#search");
+  s.oninput = () => { filter.q = s.value; filter.limit = 40; render(); };
+  document.querySelectorAll("[data-pos]").forEach(b => b.onclick = () => { filter.pos = b.dataset.pos; filter.limit = 40; render(); });
+  $("#hideInj").onchange = e => { filter.hideInjured = e.target.checked; render(); };
+  document.querySelectorAll("[data-mine]").forEach(b => b.onclick = () => pick(+b.dataset.mine, true));
+  document.querySelectorAll("[data-taken]").forEach(b => b.onclick = () => pick(+b.dataset.taken, false));
+  const more = $("#more"); if (more) more.onclick = () => { filter.limit += 60; render(); };
+  $("#undo").onclick = () => act("/api/undo", {}, "Undone");
+  $("#auto").onclick = () => act("/api/auto", {}, "Other teams picked up to your turn");
+}
+function pick(id, mine) {
+  const p = S.suggestions.find(x => x.id === id);
+  filter.q = "";
+  act("/api/pick", { player_id: id, mine }, `${p ? p.name : "Player"} ${mine ? "added to your team" : "marked as taken"}`);
+}
+
+// ---------- settings ----------
+function openSettings() {
+  const d = $("#settings");
+  $("#settingsTeam").innerHTML = S.league ? `<div class="field"><label>My team</label>${teamSelect("teamSel")}</div>` : "";
+  const ts = $("#teamSel"); if (ts) ts.onchange = () => act("/api/settings", { team_id: ts.value }, "Saved your team");
+  const cats = S.league && !S.league.is_points ? S.league.categories : [];
+  $("#settingsPunt").innerHTML = cats.length ? `<div class="field"><label>Punt (ignore) categories</label><div class="row">${cats.map(c =>
+    `<label><input type="checkbox" data-punt="${esc(c.name)}" ${c.punted ? "checked" : ""}> ${esc(c.name)}</label>`).join("")}</div></div>` : "";
+  document.querySelectorAll("[data-punt]").forEach(cb => cb.onchange = () => {
+    const punt = [...document.querySelectorAll("[data-punt]:checked")].map(x => x.dataset.punt);
+    act("/api/settings", { punt }, "Values updated");
+  });
+  const bal = $("#balance"); bal.value = S.config.balance; $("#balanceVal").textContent = S.config.balance;
+  bal.oninput = () => $("#balanceVal").textContent = bal.value;
+  bal.onchange = () => act("/api/settings", { balance: +bal.value });
+  const live = $("#live"); live.checked = S.config.live; live.disabled = S.mode !== "espn";
+  live.onchange = () => act("/api/settings", { live: live.checked });
+  bindLeagueForm($("#leagueForm2"));
+  d.showModal();
+}
+$("#settingsBtn").onclick = openSettings;
+$("#closeSettings").onclick = () => $("#settings").close();
+$("#refreshPlayers").onclick = () => act("/api/reload", { refresh: true }, "Players re-downloaded");
+$("#demo9").onclick = () => { act("/api/demo", {}, "Practice league loaded"); $("#settings").close(); };
+$("#demoPts").onclick = () => { act("/api/demo", { points: true }, "Practice league loaded"); $("#settings").close(); };
+document.addEventListener("keydown", e => {
+  if (e.key === "/" && document.activeElement.tagName !== "INPUT") { e.preventDefault(); const s = $("#search"); if (s) s.focus(); }
+  if (e.key === "Escape" && document.activeElement.id === "search") { filter.q = ""; render(); }
+});
+
+// ---------- polling ----------
+function apply(s) {
+  if (s.unchanged) { if (S) { S.last_poll = s.last_poll; S.poll_error = s.poll_error; updateStatus(); } return; }
+  S = s; version = s.version;
+  const myTurn = !!(S.clock && S.clock.my_turn);
+  if (myTurn && !wasMyTurn) beep();
+  wasMyTurn = myTurn;
+  render();
+}
+async function refresh(force) {
+  try { apply(await api(`/api/state${force || version == null ? "" : "?v=" + version}`)); }
+  catch (e) { $("#status").className = "pill err"; $("#status").textContent = "App not running"; }
+}
+refresh(true);
+setInterval(refresh, 1500);
+</script>
+</body>
+</html>
