@@ -5,7 +5,7 @@ import threading
 import time
 
 from . import demo
-from .config import CACHE_DIR, Config, normalize_swid, parse_punt, save_config
+from .config import CACHE_DIR, Config, normalize_espn_s2, normalize_swid, parse_punt, save_config
 from .draft import DraftState, suggest
 from .espn import EspnClient, EspnError, find_my_team, parse_league, parse_picks, parse_players
 from .models import Player
@@ -87,7 +87,7 @@ class App:
             if data.get("clear_cookies"):
                 cfg.espn_s2 = cfg.swid = None
             if data.get("espn_s2"):
-                cfg.espn_s2 = str(data["espn_s2"]).strip()
+                cfg.espn_s2 = normalize_espn_s2(str(data["espn_s2"]))
             if data.get("swid"):
                 cfg.swid = normalize_swid(str(data["swid"]))
             self._save(cfg)

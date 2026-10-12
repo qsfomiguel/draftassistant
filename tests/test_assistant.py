@@ -205,3 +205,16 @@ def test_helpers():
 def test_parse_players_accepts_bare_list():
     bare = [e["player"] for e in PLAYERS_JSON["players"]]
     assert [p.name for p in parse_players(bare, 2027)] == ["Nikola Jokić", "Rookie Guy"]
+
+
+def test_cookie_cleanup():
+    from draft_assistant.config import normalize_espn_s2, normalize_swid
+
+    value = "AEB" + "x%2B" * 60
+    row = f"espn_s2\t{value}\t.espn.com\t/\t2027-10-12T18:00:00.000Z\t260\t\t\t\tMedium"
+    assert normalize_espn_s2(row) == value
+    assert normalize_espn_s2(f"  {value}\n") == value
+    assert normalize_espn_s2(f"espn_s2={value};") == value
+    swid = "{1A2B3C4D-1A2B-1A2B-1A2B-1A2B3C4D5E6F}"
+    assert normalize_swid(f"SWID\t{swid}\t.espn.com\t/") == swid
+    assert normalize_swid(swid[1:-1]) == swid

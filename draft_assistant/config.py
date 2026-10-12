@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
@@ -58,10 +59,24 @@ def parse_punt(names) -> set[int]:
 
 
 def normalize_swid(swid: str | None) -> str | None:
-    swid = (swid or "").strip()
+    swid = (swid or "").strip().strip('"')
+    found = re.search(r"\{?([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})\}?", swid)
+    if found:  # also copes with a whole cookie row pasted from the developer tools
+        return "{" + found.group(1) + "}"
     if not swid:
         return None
     return swid if swid.startswith("{") else "{" + swid + "}"
+
+
+def normalize_espn_s2(value: str | None) -> str | None:
+    """The cookie value is one long token. People often paste the whole developer-tools row
+    (name, value, domain, path, expiry separated by tabs), so keep only the longest token."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    tokens = [t.strip('"') for t in re.split(r"[\s;]+", value)]
+    tokens = [t[len("espn_s2="):] if t.startswith("espn_s2=") else t for t in tokens]
+    return max(tokens, key=len) or None
 
 
 def load_config(path: Path = CONFIG_PATH) -> Config:
@@ -71,7 +86,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     env = os.environ
     if env.get("ESPN_LEAGUE_ID"):
         cfg.league_id = int(env["ESPN_LEAGUE_ID"])
-    cfg.espn_s2 = env.get("ESPN_S2") or cfg.espn_s2
+    cfg.espn_s2 = normalize_espn_s2(env.get("ESPN_S2") or cfg.espn_s2)
     cfg.swid = normalize_swid(env.get("ESPN_SWID") or cfg.swid)
     return cfg
 

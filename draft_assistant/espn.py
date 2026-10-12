@@ -39,8 +39,9 @@ class EspnClient:
             raise EspnError(f"Could not reach ESPN: {exc}") from exc
         if resp.status_code in (401, 403):
             raise EspnError(
-                "ESPN refused access to this league. If it's private, set espn_s2 and swid "
-                "in config.toml (see README)."
+                "ESPN refused access to this league. It's private, so it needs your espn_s2 and SWID "
+                "cookies, and the ones saved may be wrong or expired. Paste just each cookie's Value "
+                "in Settings."
             )
         if resp.status_code == 404:
             raise EspnError(f"League {self.league_id} not found for season {self.season}.")
