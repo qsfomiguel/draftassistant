@@ -18,6 +18,7 @@ class Player:
     adp: float | None = None
     espn_rank: int | None = None
     stat_source: str = "none"  # "proj", "last", "current" or "none"
+    sources: list[str] = field(default_factory=list)  # projection sources averaged into avg
 
 
 @dataclass

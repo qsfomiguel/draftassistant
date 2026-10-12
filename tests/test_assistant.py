@@ -238,3 +238,29 @@ def test_roto_counts_games_played():
         ranked = v.rank()
         gap[lg.scoring_type] = ranked.index(2) - ranked.index(1)
     assert gap["ROTO"] > gap["H2H_CATEGORY"] >= 0
+
+
+def test_outside_projections_parse_and_blend():
+    from draft_assistant.projections import SourceResult, blend, parse_fantasypros, parse_hashtag
+
+    fp = parse_fantasypros("""<table id="data"><thead><tr><th>Player</th><th>PTS</th><th>REB</th><th>AST</th>
+        <th>BLK</th><th>STL</th><th>FG%</th><th>FT%</th><th>3PM</th><th>GP</th><th>MIN</th><th>TO</th></tr></thead>
+        <tbody><tr><td><a>Big Man</a> (DEN - C)</td><td>2,000</td><td>1,000</td><td>500</td><td>100</td><td>50</td>
+        <td>.600</td><td>.700</td><td>0</td><td>50</td><td>1,500</td><td>100</td></tr></tbody></table>""")
+    assert fp[0].name == "Big Man" and fp[0].gp == 50 and fp[0].avg[0] == 40.0
+    ht = parse_hashtag("""<table id="ContentPlaceHolder1_GridView1"><tr><th>R#</th><th>PLAYER</th><th>TEAM</th>
+        <th>GP</th><th>FG%</th><th>FT%</th><th>3PM</th><th>PTS</th><th>TREB</th><th>AST</th><th>STL</th><th>BLK</th>
+        <th>TO</th></tr><tr><td>1</td><td>Big Man Jr. B.Man Jr.</td><td>DEN</td><td>70</td><td>0.500 (8.0/16.0)</td>
+        <td>0.800 (4.0/5.0)</td><td>0.0</td><td>20.0</td><td>10.0</td><td>5.0</td><td>1.0</td><td>2.0</td><td>1.0</td>
+        </tr></table>""")
+    assert ht[0].name == "Big Man Jr." and ht[0].avg[14] == 16.0
+
+    espn = Player(1, "Big Man", "DEN", ["C"], {4}, {0: 30.0, 13: 9.0, 14: 18.0, 19: 0.5}, gp=60, stat_source="proj")
+    nobody = Player(2, "Bench Guy", "DEN", ["C"], {4}, {0: 5.0}, gp=40, stat_source="last")
+    summary = blend([espn, nobody], [SourceResult("fantasypros", fp), SourceResult("hashtag", ht),
+                                     SourceResult("rotowire", error="down")])
+    assert espn.sources == ["espn", "fantasypros", "hashtag"]
+    assert espn.avg[0] == (30 + 40 + 20) / 3 and espn.gp == 60
+    assert abs(espn.avg[19] - (0.5 + 0.6 + 0.5) / 3) < 1e-9 and espn.avg[14] == 17.0  # attempts from ESPN + Hashtag
+    assert nobody.sources == [] and nobody.avg == {0: 5.0}
+    assert summary["blended"] == 1

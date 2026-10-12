@@ -9,6 +9,7 @@ from .config import CACHE_DIR, Config, normalize_espn_s2, normalize_swid, parse_
 from .draft import DraftState, suggest
 from .espn import EspnClient, EspnError, find_my_team, parse_league, parse_picks, parse_players
 from .models import Player
+from .projections import LABELS, blend, fetch_all
 from .valuation import Valuation, value_players
 
 BOARD_SIZE = 300  # how many available players the board shows
@@ -26,6 +27,7 @@ class App:
         self.error: str | None = None
         self.poll_error: str | None = None
         self.last_poll: float | None = None
+        self.projections: dict = {}  # summary of outside projection sources
         self.version = 0
 
     # ---- loading -------------------------------------------------------------
@@ -44,6 +46,7 @@ class App:
             raw = client.league_raw()
             league = parse_league(raw, cfg.league_id, cfg.season)
             players = parse_players(client.players_cached(CACHE_DIR, cfg.player_limit, refresh=refresh), cfg.season)
+            self.projections = blend(players, fetch_all(CACHE_DIR, refresh=refresh))
             my_team = cfg.team_id if cfg.team_id in league.teams else find_my_team(league, cfg.swid)
             state = DraftState(league, players, my_team)
             state.update_from_espn(*parse_picks(raw))
@@ -199,7 +202,7 @@ class App:
         return {
             "id": p.id, "name": p.name, "pos": p.positions, "team": p.pro_team, "injury": p.injury,
             "gp": round(p.gp) if p.gp else None, "adp": round(p.adp, 1) if p.adp else None,
-            "rank": p.espn_rank, "source": p.stat_source, "value": round(v.value.get(p.id, 0), 2),
+            "rank": p.espn_rank, "source": p.stat_source, "sources": [LABELS.get(s, s) for s in p.sources], "value": round(v.value.get(p.id, 0), 2),
             "cats": {str(k): round(z, 2) for k, z in v.cats.get(p.id, {}).items()},
             "fpg": round(v.fpts[p.id], 1) if p.id in v.fpts else None,
         }
@@ -282,6 +285,7 @@ class App:
                 "picks": picks,
                 "can_undo": bool(state.manual_picks),
                 "with_stats": sum(1 for p in state.players.values() if p.avg),
+                "projections": self.projections if self.mode == "espn" else {},
             })
             return base
 

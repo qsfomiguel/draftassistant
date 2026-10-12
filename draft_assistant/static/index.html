@@ -211,6 +211,9 @@ function renderBanners() {
   if (S.league && S.my_team_id == null) {
     b.push(`<div class="banner warn row"><b>Which team is yours?</b> ${teamSelect("bannerTeam")} <span class="hint">Needed to track your roster and your picks.</span></div>`);
   }
+  for (const src of (S.projections && S.projections.sources) || []) {
+    if (src.error) b.push(`<div class="banner warn">${esc(src.label)} projections: ${esc(src.error)}. Rankings use the other sources.</div>`);
+  }
   if (S.league && S.mode === "espn" && S.with_stats < 100) b.push(`<div class="banner warn">ESPN only sent stats for ${S.with_stats} players, so rankings may be thin. Try Settings → Re-download players.</div>`);
   if (S.league && !S.league.has_order) b.push(`<div class="banner warn">ESPN hasn't set the draft order yet, so whose turn it is is unknown. It appears once the league manager sets it.</div>`);
   $("#banners").innerHTML = b.join("");
@@ -305,6 +308,7 @@ function boardView() {
     if (p.lasts === true) tags.push(`<span class="tag last" title="ADP says he'll likely still be there at your next pick">may last</span>`);
     if (p.lasts === false) tags.push(`<span class="tag gone" title="ADP says he'll likely be gone before your next pick">gone soon</span>`);
     if (!p.fits) tags.push(`<span class="tag bench" title="Your starting slots for his positions are full">bench</span>`);
+    if (p.sources && p.sources.length > 1) tags.push(`<span class="tag" title="Projection averaged from ${esc(p.sources.join(", "))}">${p.sources.length} src</span>`);
     if (p.source === "last") tags.push(`<span class="tag" title="No projection yet; using last season">no proj</span>`);
     const stats = cols.map(c => {
       if (c.cat) { const z = p.cats[c.key]; return `<td class="z ${c.punted ? "punted" : ""}" style="${zStyle(z, c.punted)}">${z == null ? "" : (z > 0 ? "+" : "") + z.toFixed(1)}</td>`; }
