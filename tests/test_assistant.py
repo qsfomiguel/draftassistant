@@ -277,3 +277,11 @@ def test_imported_season_totals_and_abbreviated_names():
     blend([shai, jalen], [SourceResult("yahoo", rows)])
     assert shai.sources == ["espn", "yahoo"] and shai.avg[0] == 25.0
     assert "yahoo" in jalen.sources  # same initial, surname and team: accepted as the abbreviated match
+
+
+def test_snapshot_has_every_teams_category_totals():
+    app = demo_app()
+    app.autodraft()
+    s = app.snapshot()
+    assert set(s["team_totals"]) == {str(t["id"]) for t in s["league"]["teams"]}
+    assert all(set(t) == {str(c["id"]) for c in s["league"]["categories"]} for t in s["team_totals"].values())

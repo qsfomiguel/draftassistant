@@ -87,6 +87,27 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .setup { max-width: 520px; margin: 60px auto; }
 .hint { font-size: 12px; color: var(--muted); }
+.radar svg { width: 100%; height: auto; display: block; }
+.radar .ring { fill: none; stroke: var(--line); }
+.radar .ring.band { fill: var(--chip); fill-opacity: .55; }
+.radar .spoke { stroke: var(--line); }
+.radar .axis { font-size: 11px; font-weight: 600; fill: var(--text); }
+.radar .axis.punted { fill: var(--muted); opacity: .5; }
+.radar .rk { font-size: 10px; fill: var(--muted); }
+.radar .rk.up { fill: var(--good); font-weight: 600; }
+.radar .rk.down { fill: var(--bad); font-weight: 600; }
+.radar .avg { fill: #f08a6b; fill-opacity: .35; stroke: #e0603b; stroke-width: 1.5; }
+.radar .me { fill: #3e64a8; fill-opacity: .45; stroke: #2f4f8a; stroke-width: 2; }
+.radar .plus { fill: #22a06b; fill-opacity: .18; stroke: #16a34a; stroke-width: 2; stroke-dasharray: 5 3; }
+@media (prefers-color-scheme: dark) {
+  .radar .me { fill: #5b8def; stroke: #8fb3ff; }
+  .radar .plus { stroke: #4ade80; fill: #4ade80; }
+}
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; }
+.selrow td { background: color-mix(in srgb, #22a06b 14%, transparent) !important; }
+.name.sel { cursor: pointer; }
+.name.sel:hover { text-decoration: underline; }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg);
   padding: 8px 16px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
 .toast.show { opacity: .95; }
@@ -133,6 +154,7 @@ let S = null;            // latest full state
 let version = null;
 let filter = { pos: "ALL", q: "", hideInjured: false, limit: 40 };
 let wasMyTurn = false;
+let selected = null;      // player picked to preview on the team chart
 
 async function api(path, body) {
   const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
@@ -180,7 +202,7 @@ function render() {
   const focused = document.activeElement && document.activeElement.id;
   root.innerHTML = `<main>
     <div class="stack">${clockView()}${boardView()}</div>
-    <div class="stack">${rosterView()}${standingsView()}${logView()}</div>
+    <div class="stack">${S.league.is_points ? standingsView() : radarView()}${rosterView()}${logView()}</div>
   </main>`;
   bindBoard();
   if (focused === "search") { const el = $("#search"); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
@@ -314,8 +336,8 @@ function boardView() {
       if (c.cat) { const z = p.cats[c.key]; return `<td class="z ${c.punted ? "punted" : ""}" style="${zStyle(z, c.punted)}">${z == null ? "" : (z > 0 ? "+" : "") + z.toFixed(1)}</td>`; }
       return `<td>${p[c.key] ?? "–"}</td>`;
     }).join("");
-    return `<tr class="${i < 3 && filter.pos === "ALL" && !filter.q ? "top" : ""}">
-      <td class="muted">${i + 1}</td><td class="l"><span class="name">${esc(p.name)}</span>${tags.join("")}</td>
+    return `<tr class="${i < 3 && filter.pos === "ALL" && !filter.q ? "top" : ""}${selected && selected.id === p.id ? " selrow" : ""}">
+      <td class="muted">${i + 1}</td><td class="l"><span class="name sel" data-sel="${p.id}" title="Show what he adds to your team on the chart">${esc(p.name)}</span>${tags.join("")}</td>
       <td class="l">${esc(p.pos.join(", "))}</td><td class="l muted">${esc(p.team)}</td><td><b>${p.score.toFixed(1)}</b></td>
       ${stats}<td class="muted">${p.adp ? Math.round(p.adp) : "–"}</td>
       <td><div class="actions"><button class="small" data-mine="${p.id}" title="I drafted him">Mine</button><button class="small" data-taken="${p.id}" title="Another team drafted him">Taken</button></div></td>
@@ -343,6 +365,57 @@ function rosterView() {
   const items = r.map(p => `<li><span><span class="name">${esc(p.name)}</span>${p.injury ? `<span class="tag inj">${esc(p.injury.toLowerCase())}</span>` : ""}</span><span class="muted">${esc(p.pos.join(", "))} · ${esc(p.team)}</span></li>`).join("");
   return `<div class="panel roster"><h2>Your team · ${r.length}/${S.league.rounds}</h2>
     ${r.length ? `<ul>${items}</ul>` : `<p class="muted">No players yet.</p>`}</div>`;
+}
+// Team strength radar: each axis runs from the weakest team (centre) to the strongest (edge) in
+// that category right now, so the shape shows where you stand against the league, not raw totals.
+function radarView() {
+  const lg = S.league, me = S.my_team_id, totals = S.team_totals || {};
+  const cats = lg.categories;
+  const mine = totals[String(me)];
+  if (!cats.length || !mine) return "";
+  const others = Object.entries(totals).filter(([tid]) => +tid !== me).map(([, t]) => t);
+  const all = Object.values(totals);
+  const sel = selected;
+  const val = (t, c) => t[String(c.id)] || 0;
+  const withSel = c => val(mine, c) + (sel ? (sel.cats[String(c.id)] || 0) : 0);
+  const avg = c => all.reduce((s, t) => s + val(t, c), 0) / all.length;
+  const rankOf = (v, c) => 1 + others.filter(t => val(t, c) > v + 1e-9).length;
+  const n = lg.num_teams;
+
+  const size = 380, cx = size / 2, cy = size / 2 + 4, R = 128, inner = 0.12;
+  const scale = cats.map(c => {
+    const vals = all.map(t => val(t, c)).concat(sel ? [withSel(c)] : []);
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    if (hi - lo < 1e-6) { lo -= 1; hi += 1; }  // nothing drafted yet: put everyone mid-way
+    return v => inner + (1 - inner) * (v - lo) / (hi - lo);
+  });
+  const ang = i => -Math.PI / 2 + (2 * Math.PI * i) / cats.length;
+  const pt = (i, f) => [cx + Math.cos(ang(i)) * R * f, cy + Math.sin(ang(i)) * R * f];
+  const poly = (fn, cls) => `<polygon class="${cls}" points="${cats.map((c, i) => pt(i, scale[i](fn(c))).map(x => x.toFixed(1)).join(",")).join(" ")}"/>`;
+
+  const rings = [1, .78, .56, .34, inner].map((f, k) =>
+    `<polygon class="ring ${k % 2 ? "" : "band"}" points="${cats.map((c, i) => pt(i, f).join(",")).join(" ")}"/>`).join("");
+  const spokes = cats.map((c, i) => { const [x, y] = pt(i, 1); return `<line class="spoke" x1="${cx}" y1="${cy}" x2="${x}" y2="${y}"/>`; }).join("");
+  const labels = cats.map((c, i) => {
+    const [x, y] = pt(i, 1.2);
+    const anchor = Math.abs(x - cx) < 8 ? "middle" : x > cx ? "start" : "end";
+    const r0 = rankOf(val(mine, c), c);
+    let rk = `${ordinal(r0)} of ${n}`, cls = "rk";
+    if (sel) { const r1 = rankOf(withSel(c), c); if (r1 !== r0) { rk += ` → ${ordinal(r1)}`; cls += r1 < r0 ? " up" : " down"; } }
+    return `<text class="axis ${c.punted ? "punted" : ""}" x="${x}" y="${y - 2}" text-anchor="${anchor}">${esc(c.name)}</text>
+      <text class="${cls}" x="${x}" y="${y + 11}" text-anchor="${anchor}">${rk}</text>`;
+  }).join("");
+
+  const empty = !S.roster.length && !sel;
+  const title = sel ? `Your team + ${esc(sel.name)}` : "Your team vs the league";
+  return `<div class="panel radar"><h2>${title}</h2>
+    <svg viewBox="0 0 ${size} ${size + 8}" role="img" aria-label="Team strength by category">
+      ${rings}${spokes}${poly(avg, "avg")}${poly(c => val(mine, c), "me")}${sel ? poly(withSel, "plus") : ""}${labels}
+    </svg>
+    <div class="legend"><span><i style="background:#3e64a8"></i>Your team</span><span><i style="background:#f08a6b"></i>League average</span>
+      ${sel ? `<span><i style="border:2px dashed #16a34a"></i>With ${esc(sel.name)}</span> <button class="small" id="clearSel">Clear</button>` : ""}</div>
+    <p class="hint">Each spoke runs from the weakest team in that category (centre) to the strongest (edge), based on everyone's picks so far.
+      ${empty ? "Click a player's name in the list to see what he would add." : sel ? "Ranks show where you'd move if you drafted him." : "Click a player's name to preview him."}</p></div>`;
 }
 function standingsView() {
   const st = S.standings, lg = S.league;
@@ -375,6 +448,13 @@ function bindBoard() {
   document.querySelectorAll("[data-pos]").forEach(b => b.onclick = () => { filter.pos = b.dataset.pos; filter.limit = 40; render(); });
   $("#hideInj").onchange = e => { filter.hideInjured = e.target.checked; render(); };
   document.querySelectorAll("[data-mine]").forEach(b => b.onclick = () => pick(+b.dataset.mine, true));
+  document.querySelectorAll("[data-sel]").forEach(el => el.onclick = () => {
+    const id = +el.dataset.sel;
+    selected = selected && selected.id === id ? null : S.suggestions.find(p => p.id === id) || null;
+    render();
+    if (selected && window.innerWidth <= 1000) { const r = $(".radar"); if (r) r.scrollIntoView({ behavior: "smooth" }); }
+  });
+  const clr = $("#clearSel"); if (clr) clr.onclick = () => { selected = null; render(); };
   document.querySelectorAll("[data-taken]").forEach(b => b.onclick = () => pick(+b.dataset.taken, false));
   const more = $("#more"); if (more) more.onclick = () => { filter.limit += 60; render(); };
   $("#undo").onclick = () => act("/api/undo", {}, "Undone");
@@ -420,6 +500,8 @@ document.addEventListener("keydown", e => {
 function apply(s) {
   if (s.unchanged) { if (S) { S.last_poll = s.last_poll; S.poll_error = s.poll_error; updateStatus(); } return; }
   S = s; version = s.version;
+  // Drop the preview once he's off the board (drafted by anyone).
+  if (selected && !(S.suggestions || []).some(p => p.id === selected.id)) selected = null;
   const myTurn = !!(S.clock && S.clock.my_turn);
   if (myTurn && !wasMyTurn) beep();
   wasMyTurn = myTurn;

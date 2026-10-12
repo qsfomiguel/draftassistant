@@ -207,8 +207,8 @@ class App:
             "fpg": round(v.fpts[p.id], 1) if p.id in v.fpts else None,
         }
 
-    def _category_standings(self) -> dict:
-        """Each category's total for my team and where it ranks among all teams."""
+    def _team_totals(self) -> dict[int, dict[str, float]]:
+        """Every team's drafted value in each category (summed z-scores), or fantasy points per game."""
         state, v = self.state, self.valuation
         lg = state.league
         totals: dict[int, dict[str, float]] = {}
@@ -219,6 +219,11 @@ class App:
             else:
                 totals[tid] = {str(c.stat_id): sum(v.cats.get(p.id, {}).get(c.stat_id, 0) for p in roster)
                                for c in lg.categories}
+        return totals
+
+    def _category_standings(self, totals: dict[int, dict[str, float]]) -> dict:
+        """Each category's total for my team and where it ranks among all teams."""
+        state = self.state
         mine = totals.get(state.my_team_id)
         if not mine:
             return {}
@@ -246,6 +251,7 @@ class App:
             else:
                 next_after = next_pick
             suggestions = suggest(state, self.valuation, BOARD_SIZE, self.cfg.balance, self.cfg.punt_ids)
+            totals = self._team_totals()
             teams = lg.teams
             picks = []
             for overall, pick in sorted(state.picks.items()):
@@ -281,7 +287,8 @@ class App:
                 "suggestions": [dict(self._player(s.player), score=round(s.score, 2), fits=s.fits, lasts=s.lasts)
                                 for s in suggestions],
                 "roster": [self._player(p) for p in state.roster(state.my_team_id)],
-                "standings": self._category_standings(),
+                "standings": self._category_standings(totals),
+                "team_totals": {str(tid): {k: round(val, 3) for k, val in t.items()} for tid, t in totals.items()},
                 "picks": picks,
                 "can_undo": bool(state.manual_picks),
                 "with_stats": sum(1 for p in state.players.values() if p.avg),
