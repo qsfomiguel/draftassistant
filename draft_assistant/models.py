@@ -62,6 +62,11 @@ class League:
         return self.scoring_type in POINTS_SCORING
 
     @property
+    def season_totals(self) -> bool:
+        """Roto ranks season totals, so games played matter as much as per-game production."""
+        return self.scoring_type == "ROTO"
+
+    @property
     def num_teams(self) -> int:
         return len(self.teams) or len(self.pick_order)
 

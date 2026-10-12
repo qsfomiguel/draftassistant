@@ -114,7 +114,7 @@ def parse_league(data: dict, league_id: int, season: int) -> League:
     return League(
         id=league_id,
         season=season,
-        name=settings.get("name", f"League {league_id}"),
+        name=(settings.get("name") or f"League {league_id}").strip(),
         scoring_type=scoring_type,
         categories=categories,
         points=points,

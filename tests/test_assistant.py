@@ -218,3 +218,23 @@ def test_cookie_cleanup():
     swid = "{1A2B3C4D-1A2B-1A2B-1A2B-1A2B3C4D5E6F}"
     assert normalize_swid(f"SWID\t{swid}\t.espn.com\t/") == swid
     assert normalize_swid(swid[1:-1]) == swid
+
+
+def test_roto_counts_games_played():
+    import copy
+
+    players = demo.demo_players()
+    h2h = demo.demo_league()
+    roto = copy.copy(h2h)
+    roto.scoring_type = "ROTO"
+    # Same per-game line, one player plays far fewer games: roto should punish that harder.
+    healthy, fragile = copy.deepcopy(players[0]), copy.deepcopy(players[0])
+    healthy.id, fragile.id = 1, 2
+    healthy.gp, fragile.gp = 80, 40
+    pool = players + [healthy, fragile]
+    gap = {}
+    for lg in (h2h, roto):
+        v = value_players(pool, lg)
+        ranked = v.rank()
+        gap[lg.scoring_type] = ranked.index(2) - ranked.index(1)
+    assert gap["ROTO"] > gap["H2H_CATEGORY"] >= 0

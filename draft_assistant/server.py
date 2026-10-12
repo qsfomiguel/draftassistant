@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import threading
 import webbrowser
@@ -115,15 +116,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     app = App(load_config())
+    url = f"http://127.0.0.1:{args.port}/"
+    try:
+        server = serve(app, port=args.port)
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        print(f"The draft assistant is already running. Opening {url}")
+        if not args.no_browser:
+            webbrowser.open(url)
+        return 0
     if args.demo:
         app.load_demo()
     else:
         print("Loading your league from ESPN...")
         app.try_load()
-    server = serve(app, port=args.port)
     stop = threading.Event()
     threading.Thread(target=app.run_poller, args=(stop,), daemon=True).start()
-    url = f"http://127.0.0.1:{args.port}/"
     print(f"Draft assistant running at {url}  (Ctrl+C to stop)")
     if not args.no_browser:
         webbrowser.open(url)

@@ -154,7 +154,7 @@ def suggest(state: DraftState, valuation: Valuation, top: int = 15, balance: flo
         if weights is not None and p.avg:
             score = sum(z * weights.get(sid, 0.0) for sid, z in valuation.cats.get(p.id, {}).items())
             if score > 0:
-                score *= games_factor(p)
+                score *= games_factor(p, league)
         else:
             score = value
         fits = fits_starting(mine, p, slots) if slots else True

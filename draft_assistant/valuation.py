@@ -27,8 +27,8 @@ class Valuation:
         return sorted(self.value, key=self.value.get, reverse=True)
 
 
-def games_factor(p: Player) -> float:
-    if not p.gp:
+def games_factor(p: Player, league: League) -> float:
+    if league.season_totals or not p.gp:  # roto values already count games played
         return 1.0
     return min(p.gp / FULL_SEASON_GP, 1.0)
 
@@ -43,18 +43,20 @@ def value_points(players: list[Player], league: League, pool_size: int) -> Valua
 
 def _category_z(players: list[Player], league: League, pool: list[Player]) -> dict[int, dict[int, float]]:
     z: dict[int, dict[int, float]] = {p.id: {} for p in players}
+    # Per-game stats for head-to-head; projected season totals for roto.
+    games = {p.id: (p.gp or FULL_SEASON_GP) if league.season_totals else 1.0 for p in players}
     for cat in league.categories:
         sid = cat.stat_id
         if sid in PERCENT_STATS and all(PERCENT_STATS[sid][1] in p.avg for p in pool[:10]):
             made, att = PERCENT_STATS[sid]
-            total_att = sum(p.avg.get(att, 0.0) for p in pool) or 1.0
-            league_pct = sum(p.avg.get(made, 0.0) for p in pool) / total_att
+            total_att = sum(p.avg.get(att, 0.0) * games[p.id] for p in pool) or 1.0
+            league_pct = sum(p.avg.get(made, 0.0) * games[p.id] for p in pool) / total_att
 
             def metric(p: Player, made=made, att=att, league_pct=league_pct) -> float:
-                return p.avg.get(made, 0.0) - league_pct * p.avg.get(att, 0.0)
+                return (p.avg.get(made, 0.0) - league_pct * p.avg.get(att, 0.0)) * games[p.id]
         else:
             def metric(p: Player, sid=sid) -> float:
-                return p.avg.get(sid, 0.0)
+                return p.avg.get(sid, 0.0) * games[p.id]
 
         pool_vals = [metric(p) for p in pool]
         mean = statistics.fmean(pool_vals) if pool_vals else 0.0
@@ -77,7 +79,7 @@ def value_categories(players: list[Player], league: League, pool_size: int,
         value = {}
         for p in players:
             total = sum(v for sid, v in z[p.id].items() if sid not in punt)
-            value[p.id] = total * games_factor(p) if total > 0 else total
+            value[p.id] = total * games_factor(p, league) if total > 0 else total
             if not p.avg:
                 value[p.id] = -99.0
         pool = sorted(with_stats, key=lambda p: value[p.id], reverse=True)[:pool_size]
