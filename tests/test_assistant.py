@@ -264,3 +264,16 @@ def test_outside_projections_parse_and_blend():
     assert abs(espn.avg[19] - (0.5 + 0.6 + 0.5) / 3) < 1e-9 and espn.avg[14] == 17.0  # attempts from ESPN + Hashtag
     assert nobody.sources == [] and nobody.avg == {0: 5.0}
     assert summary["blended"] == 1
+
+
+def test_imported_season_totals_and_abbreviated_names():
+    from draft_assistant.projections import SourceResult, blend, parse_season_rows
+
+    rows = parse_season_rows([["S. Gilgeous-Alexander", "OKC", 50, 400, 800, 200, 250, 50, 1000, 200, 300, 50, 40, 100],
+                              ["J. Williams", "OKC", 50, 1, 2, 1, 1, 0, 3, 1, 1, 0, 0, 0]])
+    assert rows[0].avg[0] == 20.0 and rows[0].avg[19] == 0.5
+    shai = Player(1, "Shai Gilgeous-Alexander", "OKC", ["PG"], {0}, {0: 30.0}, gp=70, stat_source="proj")
+    jalen = Player(2, "Jaylin Williams", "OKC", ["C"], {4}, {0: 5.0}, gp=60, stat_source="proj")
+    blend([shai, jalen], [SourceResult("yahoo", rows)])
+    assert shai.sources == ["espn", "yahoo"] and shai.avg[0] == 25.0
+    assert "yahoo" in jalen.sources  # same initial, surname and team: accepted as the abbreviated match

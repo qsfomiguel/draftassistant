@@ -4,6 +4,9 @@ Sources (both free, public pages):
 - FantasyPros consensus: season totals for ~260 players, itself an average of several experts.
   Percentages only, no attempts, so its FG%/FT% are applied to the other sources' attempt volume.
 - Hashtag Basketball: per-game projections with makes and attempts, but only the top 30 are free.
+- Yahoo: season totals with makes and attempts. Yahoo only shows them to a signed-in user inside a
+  league, so they can't be downloaded automatically; a copy is imported into imports/yahoo.json
+  (see save_import) and used as long as it's there.
 
 For each stat, a player's number is the plain average of every source that projects it. ESPN counts
 as a source only when it has a real projection; when ESPN only has last season's stats, the outside
@@ -38,7 +41,9 @@ SOURCES = {
     "fantasypros": "https://www.fantasypros.com/nba/projections/overall.php",
     "hashtag": "https://hashtagbasketball.com/fantasy-basketball-projections",
 }
-LABELS = {"espn": "ESPN", "fantasypros": "FantasyPros", "hashtag": "Hashtag Basketball"}
+# Sources imported by hand into IMPORT_DIR rather than downloaded.
+IMPORTED = ("yahoo",)
+LABELS = {"espn": "ESPN", "fantasypros": "FantasyPros", "hashtag": "Hashtag Basketball", "yahoo": "Yahoo"}
 
 
 @dataclass
@@ -175,8 +180,38 @@ def _decode(rows: list[dict]) -> list[dict]:
     return [{**r, "avg": {int(k): v for k, v in r["avg"].items()}} for r in rows]
 
 
-def fetch_all(cache_dir: Path, refresh: bool = False) -> list[SourceResult]:
-    return [fetch_source(name, cache_dir, refresh=refresh) for name in SOURCES]
+def fetch_all(cache_dir: Path, refresh: bool = False, import_dir: Path | None = None) -> list[SourceResult]:
+    results = [fetch_source(name, cache_dir, refresh=refresh) for name in SOURCES]
+    for name in IMPORTED:
+        path = (import_dir or cache_dir.parent / "imports") / f"{name}.json"
+        if path.exists():
+            data = json.loads(path.read_text())
+            results.append(SourceResult(name, [Projection(**p) for p in _decode(data["projections"])],
+                                        fetched=data["fetched"]))
+    return results
+
+
+def parse_season_rows(rows: list[list]) -> list[Projection]:
+    """Season-total rows: name, team, GP, FGM, FGA, FTM, FTA, 3PM, PTS, REB, AST, STL, BLK, TO."""
+    out = []
+    for name, team, gp, fgm, fga, ftm, fta, tpm, pts, reb, ast, stl, blk, to in rows:
+        if not gp:
+            continue
+        avg = {k: v / gp for k, v in ((FGM, fgm), (FGA, fga), (FTM, ftm), (FTA, fta), (TPM, tpm), (PTS, pts),
+                                       (REB, reb), (AST, ast), (STL, stl), (BLK, blk), (TO, to))}
+        avg[FGP] = fgm / fga if fga else 0.0
+        avg[FTP] = ftm / fta if fta else 0.0
+        out.append(Projection(name, team, gp, avg))
+    return out
+
+
+def save_import(name: str, projections: list[Projection], import_dir: Path) -> Path:
+    import_dir.mkdir(parents=True, exist_ok=True)
+    path = import_dir / f"{name}.json"
+    path.write_text(json.dumps({"fetched": time.time(), "projections": [
+        {"name": p.name, "team": p.team, "gp": p.gp, "avg": {str(k): v for k, v in p.avg.items()}}
+        for p in projections]}))
+    return path
 
 
 # ---- matching and blending ---------------------------------------------------------
@@ -188,18 +223,29 @@ def name_key(name: str) -> str:
     return " ".join(w for w in words if w not in SUFFIXES)
 
 
+def short_key(key: str) -> str:
+    """First initial plus surname, for sources that abbreviate long names ("S. Gilgeous-Alexander")."""
+    first, _, rest = key.partition(" ")
+    return f"{first[:1]} {rest}"
+
+
 def blend(players: list[Player], results: list[SourceResult]) -> dict:
     """Average outside projections into players' per-game stats, in place. Returns a summary."""
     by_key: dict[str, list[Player]] = {}
+    by_short: dict[str, list[Player]] = {}
     for p in players:
         by_key.setdefault(name_key(p.name), []).append(p)
+        by_short.setdefault(short_key(name_key(p.name)), []).append(p)
 
     matched: dict[int, list[tuple[str, Projection]]] = {}
     summary = {"sources": []}
     for res in results:
         hits = 0
         for proj in res.projections:
-            candidates = by_key.get(name_key(proj.name), [])
+            key = name_key(proj.name)
+            candidates = by_key.get(key, [])
+            if not candidates and re.match(r"[A-Z]\. ", proj.name):  # abbreviated first name
+                candidates = by_short.get(short_key(key), [])
             if len(candidates) > 1:  # same name twice: use the team to tell them apart
                 candidates = [p for p in candidates if p.pro_team[:2] == proj.team[:2]] or candidates[:1]
             if candidates:
